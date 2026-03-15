@@ -1,0 +1,55 @@
+# Unitree H1 Humanoid Robot
+# ────────────────────────────────────────────────────────────────
+robot_id: h1
+type: humanoid
+name: "Unitree H1"
+manufacturer: Unitree Robotics
+adapter: h1
+
+# Network
+default_url: "http://192.168.123.1:8081"   # H1 onboard PC LAN IP
+api_server_port: 8081                       # h1_server.py port
+
+# Movement limits
+max_speed_mps: 1.2
+max_angular_rad_s: 2.0
+max_step_height_m: 0.2
+lateral_movement: false   # H1 walks forward/back/turn, no strafe
+
+# Physical dimensions
+dimensions:
+  height_m: 1.8
+  width_m: 0.5
+  weight_kg: 47
+  footprint_radius_m: 0.35
+
+# Safety thresholds
+safety:
+  max_tilt_deg: 20          # pitch/roll — humanoid tips more easily
+  fall_threshold_deg: 35    # → emergency stop
+  min_battery_pct: 15       # sit down before power cut
+  obstacle_stop_dist_m: 0.4 # closer clearance than wheeled robot
+
+# Capabilities
+capabilities:
+  - walk
+  - stand_up
+  - lie_down
+  - gesture
+  - wave
+  - head_camera
+  - microphone
+  - speaker
+  - tts_onboard
+
+# Professions this robot type supports
+supported_professions:
+  - h1_exhibition
+  - exhibition_robot     # also compatible with N2 exhibition pack
+
+# Exhibition defaults
+exhibition:
+  default_exhibition: auto_show
+  chat_language: ru
+  greeting_gesture: wave
+  photo_pose: bow

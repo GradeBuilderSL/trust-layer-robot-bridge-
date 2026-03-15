@@ -1,0 +1,53 @@
+# Noetix N2 Wheeled AMR Robot
+# ────────────────────────────────────────────────────────────────
+robot_id: n2
+type: amr
+name: "Noetix N2"
+manufacturer: Noetix Robotics
+adapter: http
+
+# Network
+default_url: "http://192.168.1.100:8000"
+api_server_port: 8000
+
+# Movement limits
+max_speed_mps: 0.8
+max_angular_rad_s: 1.0
+lateral_movement: true    # N2 is holonomic / omni-wheel
+
+# Physical dimensions
+dimensions:
+  height_m: 1.35
+  width_m: 0.55
+  weight_kg: 65
+  footprint_radius_m: 0.40
+
+# Safety thresholds
+safety:
+  max_tilt_deg: 10
+  fall_threshold_deg: 20
+  min_battery_pct: 10
+  obstacle_stop_dist_m: 0.5
+
+# Capabilities
+capabilities:
+  - omni_drive
+  - lidar
+  - head_camera
+  - microphone
+  - speaker
+  - led_display
+  - tts_onboard
+
+# Professions this robot type supports
+supported_professions:
+  - exhibition_robot
+  - warehouse_pick_transport
+  - security_patrol
+
+# Exhibition defaults
+exhibition:
+  default_exhibition: auto_show
+  chat_language: ru
+  greeting_gesture: ~      # N2 has no arms
+  photo_pose: ~

@@ -1,8 +1,17 @@
 """Trust-Layer Robot Bridge — FastAPI app that runs on robot or locally.
 
-Connects to the real Noetix N2 (via HTTP adapter) or simulates it (mock adapter).
+Connects to the real robot (via HTTP or H1 adapter) or simulates (mock adapter).
 Exposes endpoints for the Test Dashboard to call.
 Runs the local safety pipeline on every move command.
+
+Supported adapter types (ADAPTER_TYPE env var):
+  mock   — simulated Noetix N2 (default, no hardware needed)
+  http   — real Noetix N2 via HTTP API
+  h1     — Unitree H1 humanoid via h1_server.py running on onboard PC
+
+Quick-start for H1:
+  1. Start h1_server on H1:  ssh unitree@192.168.123.1 "python -m bridge.h1_server"
+  2. Start bridge:           ADAPTER_TYPE=h1 ROBOT_URL=http://192.168.123.1:8081 uvicorn bridge.main:app
 """
 import os
 import time
@@ -15,15 +24,16 @@ from pydantic import BaseModel
 
 from bridge.mock_adapter import MockAdapter
 from bridge.http_adapter import HttpAdapter
+from bridge.h1_adapter import H1Adapter
 from bridge.safety_pipeline import SafetyPipeline
 
 
 # ── Configuration ────────────────────────────────────────────────────────
 
-ADAPTER_TYPE = os.getenv("ADAPTER_TYPE", "mock")       # mock | http
-ROBOT_URL = os.getenv("ROBOT_URL", "http://192.168.1.100:8000")
-BRIDGE_PORT = int(os.getenv("BRIDGE_PORT", "8080"))
-POLL_HZ = int(os.getenv("POLL_HZ", "10"))
+ADAPTER_TYPE = os.getenv("ADAPTER_TYPE", "mock")       # mock | http | h1
+ROBOT_URL    = os.getenv("ROBOT_URL", "http://192.168.1.100:8000")
+BRIDGE_PORT  = int(os.getenv("BRIDGE_PORT", "8080"))
+POLL_HZ      = int(os.getenv("POLL_HZ", "10"))
 
 
 # ── State ────────────────────────────────────────────────────────────────
@@ -43,6 +53,9 @@ _start_time = time.time()
 def _create_adapter():
     if ADAPTER_TYPE == "http":
         return HttpAdapter(robot_url=ROBOT_URL)
+    if ADAPTER_TYPE == "h1":
+        h1_url = os.getenv("ROBOT_URL", "http://192.168.123.1:8081")
+        return H1Adapter(robot_url=h1_url)
     return MockAdapter()
 
 
