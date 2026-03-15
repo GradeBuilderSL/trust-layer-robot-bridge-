@@ -221,6 +221,87 @@ def pipeline_stats():
     return _pipeline.get_stats()
 
 
+# ── Voice endpoints ──────────────────────────────────────────────────────
+
+class SpeakRequest(BaseModel):
+    text: str
+    language: str = "ru"
+
+
+@app.post("/voice/speak")
+def voice_speak(req: SpeakRequest):
+    """Text-to-speech: send text to robot's speaker.
+
+    If robot has TTS hardware, forwards to it.
+    Otherwise returns the text for client-side TTS.
+    """
+    if _adapter and hasattr(_adapter, "speak"):
+        result = _adapter.speak(req.text, req.language)
+        return {"ok": True, "method": "robot_tts", **result}
+    # Fallback: return text for client-side Web Speech API
+    return {
+        "ok": True,
+        "method": "client_tts",
+        "text": req.text,
+        "language": req.language,
+    }
+
+
+class SttResult(BaseModel):
+    text: str = ""
+    language: str = ""
+    confidence: float = 0.0
+
+
+@app.get("/voice/listen")
+def voice_listen():
+    """Speech-to-text: get transcription from robot's mic.
+
+    If robot has STT hardware, returns transcription.
+    Otherwise returns empty (client should use Web Speech API).
+    """
+    if _adapter and hasattr(_adapter, "listen"):
+        result = _adapter.listen()
+        return {"ok": True, "method": "robot_stt", **result}
+    return {
+        "ok": True,
+        "method": "client_stt",
+        "text": "",
+        "message": "Use Web Speech API on client",
+    }
+
+
+# ── Camera endpoints ─────────────────────────────────────────────────────
+
+@app.post("/camera/capture")
+def camera_capture():
+    """Capture a photo from robot's camera.
+
+    Returns base64-encoded JPEG or URL to download.
+    """
+    if _adapter and hasattr(_adapter, "capture_photo"):
+        result = _adapter.capture_photo()
+        return {"ok": True, **result}
+    return {
+        "ok": False,
+        "error": "Camera not available on this adapter",
+    }
+
+
+@app.get("/camera/status")
+def camera_status():
+    """Camera hardware status."""
+    with _state_lock:
+        state = dict(_latest_state)
+    sensors = state.get("sensors", {})
+    camera = sensors.get("camera", {})
+    return {
+        "available": camera.get("health", 0) > 0.5,
+        "fps": camera.get("fps", 0),
+        "health": camera.get("health", 0),
+    }
+
+
 # ── Main ─────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
