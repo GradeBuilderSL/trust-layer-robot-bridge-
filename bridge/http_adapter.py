@@ -114,6 +114,102 @@ class HttpAdapter:
             self.connected = False
             return None
 
+    def probe_capabilities(self) -> dict:
+        """Active probe of real N2 hardware subsystems. Uses short timeouts."""
+        import time as _time
+        caps = {}
+
+        # Probe robot API — get full status first
+        state = self._get("/api/status")
+        sensors = (state or {}).get("sensors", {})
+
+        # Camera
+        cam_data = sensors.get("camera", {})
+        cam_ok = cam_data.get("health", 0) > 0.3 or cam_data.get("ok", False)
+        cam_test = self._get("/api/camera/status") or {}
+        caps["camera"] = {
+            "available": cam_ok or cam_test.get("ok", False),
+            "health": cam_data.get("health", 0),
+            "fps": cam_data.get("fps") or cam_test.get("fps"),
+            "resolution": cam_test.get("resolution"),
+            "probe": "ok" if cam_ok else "degraded_or_unavailable",
+            "has_preview": cam_ok,
+            "note": cam_test.get("note", ""),
+        }
+
+        # Lidar
+        lidar = sensors.get("lidar", {})
+        lidar_ok = lidar.get("health", 0) > 0.3 or lidar.get("available", False)
+        caps["lidar"] = {
+            "available": lidar_ok,
+            "health": lidar.get("health", 0),
+            "probe": "ok" if lidar_ok else "not_installed",
+            "note": "" if lidar_ok else "Lidar not detected on /api/status",
+        }
+
+        # IMU
+        imu = sensors.get("imu", {})
+        imu_ok = imu.get("health", 0) > 0.3
+        caps["imu"] = {
+            "available": imu_ok,
+            "health": imu.get("health", 0),
+            "probe": "ok" if imu_ok else "degraded",
+            "note": "Tilt/pitch/roll from IMU",
+        }
+
+        # Voice (try /api/voice/status; degrade gracefully)
+        voice = self._get("/api/voice/status") or {}
+        mic_ok = voice.get("mic_available", False)
+        spk_ok = voice.get("speaker_available", False)
+        caps["microphone"] = {
+            "available": mic_ok,
+            "sample_rate": voice.get("sample_rate", 16000),
+            "probe": "ok" if mic_ok else "client_stt_fallback",
+            "method": "robot_stt" if mic_ok else "client_stt",
+            "note": "Robot microphone" if mic_ok else "Web Speech API fallback (client-side)",
+        }
+        caps["speaker"] = {
+            "available": spk_ok,
+            "probe": "ok" if spk_ok else "client_tts_fallback",
+            "method": "robot_tts" if spk_ok else "client_tts",
+            "note": "Robot speaker" if spk_ok else "Web Speech API fallback (client-side)",
+        }
+
+        # Drive
+        drive_ok = self.connected and state is not None
+        caps["drive"] = {
+            "available": drive_ok,
+            "probe": "ok" if drive_ok else "disconnected",
+            "type": "holonomic",
+            "max_speed_mps": 0.8,
+            "note": f"HTTP commands to {self.robot_url}/api/cmd/velocity",
+        }
+
+        # Battery
+        bat = float((state or {}).get("battery_pct", 0))
+        bat_ok = bat > 5
+        caps["battery"] = {
+            "available": True,
+            "level_pct": round(bat, 1),
+            "probe": "ok" if bat_ok else "critical",
+            "estimated_runtime_min": int(bat * 2.4) if bat > 0 else 0,
+            "note": "Critical — charge before demo" if not bat_ok else "",
+        }
+
+        # Network
+        t0 = _time.time()
+        net_ok = self._get("/health") is not None
+        latency_ms = round((_time.time() - t0) * 1000, 1)
+        caps["network"] = {
+            "available": net_ok,
+            "probe": "ok" if net_ok else "unreachable",
+            "latency_ms": latency_ms if net_ok else None,
+            "robot_url": self.robot_url,
+            "note": f"Round-trip to {self.robot_url}/health",
+        }
+
+        return caps
+
     def _error_state(self) -> dict:
         return {
             "position": {"x": 0, "y": 0, "z": 0},

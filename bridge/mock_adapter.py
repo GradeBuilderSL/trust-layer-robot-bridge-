@@ -123,6 +123,51 @@ class MockAdapter:
             self._vy = 0.0
             self._wz = 0.0
 
+    def probe_capabilities(self) -> dict:
+        """Return simulated hardware capability report (no real probing needed)."""
+        with self._lock:
+            bat = round(self._battery, 1)
+        return {
+            "camera": {
+                "available": True, "health": 0.95, "fps": 15,
+                "resolution": "1280x720", "probe": "ok", "latency_ms": 42,
+                "has_preview": True, "note": "RGB head camera (simulated)",
+            },
+            "lidar": {
+                "available": False, "health": 0.0,
+                "probe": "not_installed", "note": "Lidar not installed on this unit",
+            },
+            "imu": {
+                "available": True, "health": 0.92,
+                "probe": "ok", "latency_ms": 2, "note": "6-axis IMU (pitch/roll/yaw)",
+            },
+            "microphone": {
+                "available": True, "probe": "ok",
+                "sample_rate": 16000, "channels": 1,
+                "method": "client_stt", "note": "Web Speech API (client-side STT)",
+            },
+            "speaker": {
+                "available": True, "probe": "ok",
+                "method": "client_tts", "note": "Web Speech API (client-side TTS)",
+            },
+            "drive": {
+                "available": True, "probe": "ok",
+                "type": "holonomic", "max_speed_mps": 0.8,
+                "note": "Omni-wheel drive — vx/vy/wz commands",
+            },
+            "battery": {
+                "available": True, "probe": "ok",
+                "level_pct": bat,
+                "estimated_runtime_min": int(bat * 2.4),
+                "note": "Li-Ion battery pack",
+            },
+            "network": {
+                "available": True, "probe": "ok",
+                "latency_ms": 1, "adapter": "mock",
+                "note": "Local mock — no real network",
+            },
+        }
+
     def get_entities(self) -> list[dict]:
         """Return simulated scene entities."""
         with self._lock:

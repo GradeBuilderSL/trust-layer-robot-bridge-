@@ -23,9 +23,11 @@ Autonomous mode:
   Local brain handles safety, Q&A, exhibition FSM without Wi-Fi.
   Status: GET /brain/status
 """
+import json
 import os
 import time
 import threading
+import urllib.request
 from contextlib import asynccontextmanager
 from typing import Optional
 
@@ -41,6 +43,7 @@ from bridge.license_manager import LicenseManager
 from bridge.local_brain import LocalBrain
 from bridge.connectivity_monitor import ConnectivityMonitor
 from bridge.event_buffer import EventBuffer
+from bridge.watchdog import EdgeWatchdog
 
 
 # ── Configuration ────────────────────────────────────────────────────────
@@ -54,6 +57,49 @@ DATA_DIR = os.getenv("DATA_DIR", "/data")
 ACTIVATION_SERVER = os.getenv(
     "ACTIVATION_SERVER", "https://activate.partenit.ai"
 )
+DECISION_LOG_URL = os.getenv("DECISION_LOG_URL", "")  # e.g. http://decision_log:9114
+
+
+# ── Decision log push ─────────────────────────────────────────────────────
+
+def _push_decision(robot_id: str, command: str, gate) -> None:
+    """Push GateResult to central decision_log asynchronously (fire-and-forget)."""
+    if not DECISION_LOG_URL:
+        return
+    audit_ref = getattr(gate, "audit_ref", "") or "ISO 3691-4:2023"
+    packet = {
+        "robot_id": robot_id,
+        "agent_id": robot_id,
+        "command": command,
+        "action_type": command,
+        "verdict": gate.decision,
+        "decision_type": gate.decision,
+        "rule_id": gate.rule_id or "—",
+        "rule_code": gate.rule_id or "—",
+        "reason": gate.reason or "OK",
+        "rationale": gate.reason or "OK",
+        "standard": audit_ref,
+        "audit_ref": audit_ref,
+        "ts": time.time(),
+        "timestamp_ms": int(time.time() * 1000),
+        "source": "robot_bridge",
+        "adapter": ADAPTER_TYPE,
+    }
+
+    def _post():
+        try:
+            body = json.dumps(packet).encode()
+            req = urllib.request.Request(
+                f"{DECISION_LOG_URL}/log",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=1.0)
+        except Exception:
+            pass  # never block the safety path
+
+    threading.Thread(target=_post, daemon=True).start()
 
 
 # ── State ────────────────────────────────────────────────────────────────
@@ -71,6 +117,37 @@ _latest_entities: list[dict] = []
 _poller_thread: threading.Thread | None = None
 _running = False
 _start_time = time.time()
+
+# ── EdgeWatchdog ──────────────────────────────────────────────────────────────
+# Fires SAFE_FALLBACK if upstream (operator_ui/sim_dashboard) stops heartbeating.
+# Heartbeat is registered on every /robot/move, /robot/stop, /robot/heartbeat.
+
+def _on_watchdog_fallback():
+    """Called when watchdog fires: stop robot immediately."""
+    logger.warning("SAFE_FALLBACK: watchdog timeout — stopping robot")
+    try:
+        if _adapter:
+            _adapter.stop()
+    except Exception as exc:
+        logger.error("SAFE_FALLBACK stop failed: %s", exc)
+    # Push SAFE_FALLBACK event to decision_log
+    class _FallbackGate:
+        decision = "DENY"
+        reason = "SAFE_FALLBACK: watchdog timeout (800ms no heartbeat)"
+        rule_id = "WATCHDOG-FALLBACK"
+        audit_ref = "claude.md §0.1 (fail-safe on connectivity loss)"
+        params = {}
+    _push_decision("watchdog", "SAFE_FALLBACK", _FallbackGate())
+
+
+def _on_watchdog_recover():
+    logger.info("watchdog: upstream heartbeat restored")
+
+
+_watchdog = EdgeWatchdog(
+    on_fallback=_on_watchdog_fallback,
+    on_recover=_on_watchdog_recover,
+)
 
 
 # ── Adapter factory ─────────────────────────────────────────────────────
@@ -139,6 +216,9 @@ async def lifespan(app: FastAPI):
     )
     _connectivity.start()
 
+    # 5. Start EdgeWatchdog (200ms heartbeat, 800ms → SAFE_FALLBACK)
+    _watchdog.start()
+
     # 5. Periodic event buffer maintenance (every hour)
     def _maintenance():
         while _running:
@@ -193,12 +273,17 @@ def health():
     """Bridge health check."""
     with _state_lock:
         connected = _adapter.connected if _adapter else False
+    wds = _watchdog.status()
     return {
         "status": "ok",
         "adapter": ADAPTER_TYPE,
         "connected": connected,
         "uptime_s": round(time.time() - _start_time, 1),
         "poll_hz": POLL_HZ,
+        "watchdog": wds,
+        "safe_fallback": wds["in_fallback"],
+        "rules_loaded": _pipeline.get_stats().get("rules_loaded", 0),
+        "rules_backend": _pipeline.get_stats().get("rules_backend", "unknown"),
     }
 
 
@@ -219,6 +304,24 @@ def robot_move(req: MoveRequest):
     if not _adapter:
         raise HTTPException(503, "Adapter not initialized")
 
+    # Register heartbeat — upstream is alive
+    _watchdog.heartbeat()
+
+    # Refuse if in SAFE_FALLBACK (watchdog fired)
+    if _watchdog.in_fallback:
+        return {
+            "requested": {"vx": req.vx, "vy": req.vy, "wz": req.wz},
+            "applied": {"vx": 0.0, "vy": 0.0, "wz": 0.0},
+            "gate": {
+                "decision": "DENY",
+                "reason": "SAFE_FALLBACK active — restore heartbeat first",
+                "rule_id": "WATCHDOG-FALLBACK",
+                "audit_ref": "claude.md §0.1",
+                "params": {},
+            },
+            "send": {"status": "safe_fallback"},
+        }
+
     with _state_lock:
         state = dict(_latest_state)
         entities = list(_latest_entities)
@@ -228,6 +331,11 @@ def robot_move(req: MoveRequest):
         req.vx, req.vy, req.wz, state, entities,
     )
 
+    # Push every decision to central decision_log (async, non-blocking)
+    robot_id = state.get("robot_id", state.get("name", f"bridge-{ADAPTER_TYPE}"))
+    cmd_str = f"move vx={req.vx:.2f} vy={req.vy:.2f} wz={req.wz:.2f}"
+    _push_decision(robot_id, cmd_str, gate)
+
     result = {
         "requested": {"vx": req.vx, "vy": req.vy, "wz": req.wz},
         "applied": {"vx": round(vx, 3), "vy": round(vy, 3), "wz": round(wz, 3)},
@@ -235,6 +343,7 @@ def robot_move(req: MoveRequest):
             "decision": gate.decision,
             "reason": gate.reason,
             "rule_id": gate.rule_id,
+            "audit_ref": getattr(gate, "audit_ref", ""),
             "params": gate.params,
         },
     }
@@ -255,8 +364,22 @@ def robot_stop():
     """Emergency stop."""
     if not _adapter:
         raise HTTPException(503, "Adapter not initialized")
+    _watchdog.heartbeat()  # operator is present
     result = _adapter.stop()
     return result
+
+
+@app.post("/robot/heartbeat")
+def robot_heartbeat():
+    """Explicit heartbeat from upstream — resets watchdog timer."""
+    _watchdog.heartbeat()
+    return {"ok": True, "in_fallback": _watchdog.in_fallback}
+
+
+@app.get("/watchdog/status")
+def watchdog_status():
+    """EdgeWatchdog status: timeout threshold, fallback state, last heartbeat age."""
+    return _watchdog.status()
 
 
 @app.get("/robot/reasoning")
@@ -380,6 +503,99 @@ def camera_status():
     }
 
 
+# ── Capabilities endpoint ────────────────────────────────────────────────
+
+@app.get("/robot/capabilities")
+def robot_capabilities():
+    """Active hardware capability scan. Probes all subsystems and returns status report.
+
+    Each capability: available (bool), probe (str), health (float 0-1), note (str).
+    probe values: ok | degraded | not_installed | disconnected | client_*_fallback | state_only
+    """
+    scanned_at = time.time()
+
+    # Use adapter's probe if available (most accurate)
+    if _adapter and hasattr(_adapter, "probe_capabilities"):
+        caps = _adapter.probe_capabilities()
+    else:
+        # Derive from latest polled state as fallback
+        with _state_lock:
+            state = dict(_latest_state)
+        sensors = state.get("sensors", {})
+        caps = {}
+        for name in ("camera", "lidar", "imu"):
+            s = sensors.get(name, {})
+            ok = s.get("health", 0) > 0.3 or s.get("available", False)
+            caps[name] = {
+                "available": ok, "health": s.get("health", 0),
+                "probe": "state_only", "note": "Derived from telemetry, not actively probed",
+            }
+        bat = state.get("battery", 0)
+        caps["microphone"] = {"available": False, "probe": "unknown", "method": "client_stt"}
+        caps["speaker"] = {"available": False, "probe": "unknown", "method": "client_tts"}
+        caps["drive"] = {
+            "available": (_adapter.connected if _adapter else False),
+            "probe": "state_only", "type": "holonomic", "max_speed_mps": 0.8,
+        }
+        caps["battery"] = {
+            "available": True, "level_pct": bat, "probe": "state_only",
+            "estimated_runtime_min": int(bat * 2.4) if bat > 0 else 0,
+        }
+        caps["network"] = {
+            "available": (_adapter.connected if _adapter else False),
+            "probe": "state_only", "adapter": ADAPTER_TYPE,
+        }
+
+    # Annotate voice capabilities from bridge level (adapter-agnostic)
+    caps.setdefault("microphone", {})["bridge_stt"] = (
+        hasattr(_adapter, "listen") if _adapter else False
+    )
+    caps.setdefault("speaker", {})["bridge_tts"] = (
+        hasattr(_adapter, "speak") if _adapter else False
+    )
+
+    # Readiness score: fraction of subsystems that are available
+    available_count = sum(1 for c in caps.values() if c.get("available"))
+    total = len(caps)
+
+    return {
+        "capabilities": caps,
+        "adapter": ADAPTER_TYPE,
+        "robot_url": ROBOT_URL if ADAPTER_TYPE != "mock" else None,
+        "scanned_at": scanned_at,
+        "scan_duration_ms": round((time.time() - scanned_at) * 1000, 1),
+        "readiness": {
+            "score": round(available_count / total, 2) if total else 0,
+            "available": available_count,
+            "total": total,
+        },
+    }
+
+
+@app.get("/camera/frame")
+def camera_frame():
+    """Single camera frame for preview. Returns base64 JPEG or SVG placeholder."""
+    if _adapter and hasattr(_adapter, "capture_photo"):
+        result = _adapter.capture_photo()
+        return {"ok": True, **result}
+    if ADAPTER_TYPE == "mock":
+        # SVG test pattern as placeholder
+        svg = (
+            "<svg xmlns='http://www.w3.org/2000/svg' width='320' height='240'>"
+            "<rect width='100%' height='100%' fill='#0a0a14'/>"
+            "<rect x='10' y='10' width='300' height='220' fill='none' stroke='#5B4CE033' stroke-width='1'/>"
+            "<text x='160' y='110' fill='#5B4CE0' font-family='monospace' font-size='13' "
+            "text-anchor='middle'>MOCK CAMERA</text>"
+            "<text x='160' y='132' fill='#64748b' font-family='monospace' font-size='11' "
+            "text-anchor='middle'>320 × 240 · 15 fps</text>"
+            "<circle cx='160' cy='168' r='18' fill='none' stroke='#5B4CE044' stroke-width='1'/>"
+            "<circle cx='160' cy='168' r='6' fill='#5B4CE066'/>"
+            "</svg>"
+        )
+        return {"ok": True, "method": "mock_svg", "format": "svg", "data": svg}
+    return {"ok": False, "error": "Camera capture not supported on this adapter"}
+
+
 # ── License endpoints ────────────────────────────────────────────────────
 
 class ActivateRequest(BaseModel):
@@ -479,6 +695,57 @@ def brain_sync():
         "synced":   len(synced_ids),
         "failed":   len(errors),
         "errors":   errors[:3],
+    }
+
+
+class ChatSendRequest(BaseModel):
+    message: str = ""  # command word: stop, move_forward, move_backward, turn_left, turn_right, …
+
+
+_CHAT_SEND_MAP = {
+    "stop":           (0.0,  0.0, 0.0,  True),   # (vx, vy, wz, is_stop)
+    "move_forward":   (0.3,  0.0, 0.0,  False),
+    "move_backward":  (-0.3, 0.0, 0.0,  False),
+    "turn_left":      (0.0,  0.0, 0.5,  False),
+    "turn_right":     (0.0,  0.0, -0.5, False),
+}
+
+
+@app.post("/chat/send")
+def chat_send(req: ChatSendRequest):
+    """Accept command word from sim_dashboard / operator_ui and execute via safety pipeline.
+
+    Drop-in replacement for Isaac Sim bridge /chat/send — allows operator_ui + sim_dashboard
+    to work identically with real robot (ADAPTER_TYPE=http) and simulation (ADAPTER_TYPE=mock).
+    """
+    cmd = req.message.strip().lower()
+
+    if not _adapter:
+        return {"status": "error", "reason": "adapter_not_initialized"}
+
+    if cmd == "stop" or cmd not in _CHAT_SEND_MAP:
+        # Unknown commands → safe stop
+        _adapter.stop()
+        if cmd not in _CHAT_SEND_MAP and cmd not in ("look around", "wave", "bow", "sit", "stand"):
+            return {"status": "received", "command": cmd, "executed": "stop_fallback"}
+        return {"status": "received", "command": cmd, "executed": "stop"}
+
+    vx, vy, wz, _ = _CHAT_SEND_MAP[cmd]
+    with _state_lock:
+        state = dict(_latest_state)
+        entities = list(_latest_entities)
+
+    vx_safe, vy_safe, wz_safe, gate = _pipeline.check(vx, vy, wz, state, entities)
+    if gate.decision != "DENY":
+        _adapter.send_velocity(vx_safe, vy_safe, wz_safe)
+    else:
+        _adapter.stop()
+
+    return {
+        "status": "received",
+        "command": cmd,
+        "gate": gate.decision,
+        "rule_id": gate.rule_id,
     }
 
 
