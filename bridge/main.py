@@ -25,6 +25,7 @@ Autonomous mode:
 """
 import json
 import os
+import subprocess
 import time
 import threading
 import urllib.request
@@ -503,6 +504,102 @@ def camera_status():
     }
 
 
+# ── ROS discovery ────────────────────────────────────────────────────────
+
+# Maps topic patterns → capability key
+_ROS_TOPIC_MAP: list[tuple[list[str], str]] = [
+    (["/camera/image_raw", "/camera/color/image_raw", "/image_raw",
+      "/camera/rgb/image_raw", "/head_camera/image_raw"],        "camera"),
+    (["/scan", "/lidar/scan", "/points", "/velodyne_points",
+      "/lidar_points", "/laser_scan"],                           "lidar"),
+    (["/imu/data", "/imu_data", "/imu", "/imu/raw"],             "imu"),
+    (["/odom", "/wheel_odom", "/odometry/filtered",
+      "/odometry/local"],                                         "odometry"),
+    (["/cmd_vel", "/cmd_vel_safe", "/cmd_vel_mux/input/navi"],   "drive"),
+    (["/battery_state", "/battery", "/power_supply_state"],      "battery"),
+    (["/joint_states", "/joint_state"],                          "joints"),
+    (["/depth/image_raw", "/camera/depth/image_raw",
+      "/depth_registered/image_raw"],                            "depth_camera"),
+    (["/diagnostics", "/diagnostics_agg"],                       "diagnostics"),
+    (["/tf", "/tf_static"],                                       "tf"),
+    (["/map", "/map_metadata"],                                   "mapping"),
+    (["/amcl_pose", "/localization_pose"],                        "localization"),
+    (["/path", "/plan", "/move_base/NavfnROS/plan"],              "navigation"),
+    (["/audio", "/audio_capture", "/recognizer/output"],          "audio"),
+]
+
+_ROS_NODE_MAP: list[tuple[list[str], str]] = [
+    (["nav2_", "move_base", "navfn"],                             "navigation"),
+    (["slam_", "cartographer", "hector_slam"],                    "slam"),
+    (["realsense", "camera_node", "image_proc"],                  "camera"),
+    (["imu_", "microstrain", "phidgets_imu"],                     "imu"),
+    (["lidar_", "velodyne_", "rplidar", "hokuyo"],                "lidar"),
+    (["audio_capture", "sound_play", "tts_"],                     "audio"),
+]
+
+
+def _ros_discover() -> dict:
+    """Run ros2 topic and node discovery via subprocess.
+
+    Returns dict with:
+      available (bool), topics (list), nodes (list), capabilities (dict of key→status)
+    """
+    result: dict = {"available": False, "topics": [], "nodes": [], "capabilities": {}}
+    try:
+        raw_topics = subprocess.check_output(
+            ["ros2", "topic", "list", "-t"],
+            timeout=5.0, text=True, stderr=subprocess.DEVNULL,
+        ).strip().splitlines()
+        raw_nodes = subprocess.check_output(
+            ["ros2", "node", "list"],
+            timeout=5.0, text=True, stderr=subprocess.DEVNULL,
+        ).strip().splitlines()
+    except FileNotFoundError:
+        result["error"] = "ros2_not_installed"
+        return result
+    except subprocess.TimeoutExpired:
+        result["error"] = "ros2_timeout"
+        return result
+    except Exception as exc:
+        result["error"] = str(exc)
+        return result
+
+    result["available"] = True
+
+    # Parse topic names (format: "/name [pkg/msg/Type]")
+    topic_names: set[str] = set()
+    topic_types: dict[str, str] = {}
+    for line in raw_topics:
+        parts = line.strip().split()
+        if parts:
+            topic_names.add(parts[0])
+            if len(parts) >= 2:
+                topic_types[parts[0]] = parts[1].strip("[]")
+
+    result["topics"] = sorted(topic_names)
+    result["nodes"] = sorted(t.strip() for t in raw_nodes if t.strip())
+
+    # Map topics → capabilities
+    caps: dict[str, dict] = {}
+    for topic_list, cap_key in _ROS_TOPIC_MAP:
+        found = [t for t in topic_list if t in topic_names]
+        if found:
+            caps[cap_key] = {
+                "ros_available": True,
+                "topics": found,
+                "type": topic_types.get(found[0], ""),
+            }
+
+    # Supplement with node hints
+    node_str = " ".join(result["nodes"])
+    for node_patterns, cap_key in _ROS_NODE_MAP:
+        if any(p in node_str for p in node_patterns):
+            caps.setdefault(cap_key, {})["ros_nodes_detected"] = True
+
+    result["capabilities"] = caps
+    return result
+
+
 # ── Capabilities endpoint ────────────────────────────────────────────────
 
 @app.get("/robot/capabilities")
@@ -554,6 +651,27 @@ def robot_capabilities():
         hasattr(_adapter, "speak") if _adapter else False
     )
 
+    # ROS discovery (best-effort, never blocks capabilities from being returned)
+    ros = _ros_discover()
+    if ros.get("available"):
+        # Merge ROS-discovered capabilities into caps dict
+        for ros_cap_key, ros_info in ros["capabilities"].items():
+            entry = caps.setdefault(ros_cap_key, {})
+            # Only upgrade available status if not already set by adapter
+            if "available" not in entry:
+                entry["available"] = ros_info.get("ros_available", False)
+                entry["probe"] = "ros_discovery"
+            entry["ros_topics"] = ros_info.get("topics", [])
+            entry["ros_type"] = ros_info.get("type", "")
+            if ros_info.get("ros_nodes_detected"):
+                entry["ros_nodes_detected"] = True
+            if not entry.get("note"):
+                entry["note"] = f"ROS topic: {', '.join(ros_info.get('topics', []))}"
+    else:
+        # Mark capabilities that could only come from ROS as unknown
+        for ros_cap_key, _ in _ROS_TOPIC_MAP:
+            pass  # adapter probes are authoritative; no need to downgrade
+
     # Readiness score: fraction of subsystems that are available
     available_count = sum(1 for c in caps.values() if c.get("available"))
     total = len(caps)
@@ -568,6 +686,14 @@ def robot_capabilities():
             "score": round(available_count / total, 2) if total else 0,
             "available": available_count,
             "total": total,
+        },
+        "ros_discovery": {
+            "available": ros.get("available", False),
+            "topics_found": len(ros.get("topics", [])),
+            "nodes_found": len(ros.get("nodes", [])),
+            "error": ros.get("error"),
+            "topics": ros.get("topics", []),
+            "nodes": ros.get("nodes", []),
         },
     }
 
