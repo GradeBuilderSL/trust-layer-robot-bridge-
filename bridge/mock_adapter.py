@@ -44,6 +44,11 @@ class MockAdapter(RobotAdapter):
         self._cmd_vx = 0.0
         self._cmd_vy = 0.0
         self._cmd_wz = 0.0
+        # Navigation target (set by navigate_to)
+        self._nav_target_x: float | None = None
+        self._nav_target_y: float | None = None
+        self._nav_target_heading: float = 0.0
+        self._nav_speed: float = 0.3
         # Status
         self.connected = True
         self.name = "mock"
@@ -190,10 +195,77 @@ class MockAdapter(RobotAdapter):
                 })
             return result
 
+    def navigate_to(
+        self,
+        x_m: float,
+        y_m: float,
+        heading_rad: float = 0.0,
+        speed_mps: float = 0.3,
+    ) -> dict:
+        """Simulate navigate_to: drive toward (x_m, y_m) at given speed."""
+        with self._lock:
+            self._nav_target_x = float(x_m)
+            self._nav_target_y = float(y_m)
+            self._nav_target_heading = float(heading_rad)
+            self._nav_speed = max(0.1, min(self.MAX_SPEED, float(speed_mps)))
+            self._last_cmd_time = time.time()
+        return {
+            "status": "ok",
+            "adapter": self.name,
+            "target": {"x": x_m, "y": y_m},
+            "speed_mps": speed_mps,
+        }
+
+    def get_lidar_scan(self) -> dict:
+        """Return synthetic 2D LiDAR scan (36 rays, 10° resolution)."""
+        ranges = [
+            2.0 + 0.5 * math.sin(i * math.pi / 9) for i in range(36)
+        ]
+        return {
+            "available": True,
+            "source": "mock",
+            "angle_min_rad": -math.pi,
+            "angle_max_rad": math.pi,
+            "angle_increment_rad": round(2 * math.pi / 36, 6),
+            "ranges": [round(r, 3) for r in ranges],
+            "range_min_m": 0.1,
+            "range_max_m": 10.0,
+            "timestamp_s": time.time(),
+        }
+
     # ── internal ──────────────────────────────────────────────────────
 
     def _simulate_step(self):
         """Advance physics by one DT step."""
+        # Navigate-to: compute velocity toward target
+        if self._nav_target_x is not None:
+            dx = self._nav_target_x - self._x
+            dy = self._nav_target_y - self._y
+            dist = math.hypot(dx, dy)
+            if dist < 0.05:  # arrived
+                self._nav_target_x = None
+                self._nav_target_y = None
+                self._cmd_vx = 0.0
+                self._cmd_vy = 0.0
+            else:
+                # Drive in world frame, decompose to robot frame
+                desired_angle = math.atan2(dy, dx)
+                cos_h = math.cos(self._heading)
+                sin_h = math.sin(self._heading)
+                world_vx = (dx / dist) * self._nav_speed
+                world_vy = (dy / dist) * self._nav_speed
+                # Rotate to robot frame
+                self._cmd_vx = world_vx * cos_h + world_vy * sin_h
+                self._cmd_vy = -world_vx * sin_h + world_vy * cos_h
+                # Steer toward target heading
+                angle_err = math.atan2(
+                    math.sin(desired_angle - self._heading),
+                    math.cos(desired_angle - self._heading),
+                )
+                self._cmd_wz = max(-self.MAX_ANGULAR,
+                                   min(self.MAX_ANGULAR, angle_err * 2.0))
+            self._last_cmd_time = time.time()
+
         # Smooth velocity toward command (simple ramp)
         ramp = 0.3  # acceleration factor per tick
         self._vx += (self._cmd_vx - self._vx) * ramp

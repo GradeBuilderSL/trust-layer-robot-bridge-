@@ -24,6 +24,7 @@ Autonomous mode:
   Status: GET /brain/status
 """
 import json
+import logging
 import os
 import subprocess
 import time
@@ -31,6 +32,8 @@ import threading
 import urllib.request
 from contextlib import asynccontextmanager
 from typing import Optional
+
+logger = logging.getLogger("bridge")
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -266,6 +269,19 @@ class MoveRequest(BaseModel):
     wz: float = 0.0
 
 
+class ActionRequest(BaseModel):
+    action_id: str = ""
+    action_type: str
+    robot_id: str = ""
+    target_position: Optional[dict] = None  # {x, y, z} in metres
+    target_zone_id: str = ""
+    target_object_id: str = ""
+    target_speed_mps: float = 0.0
+    constraints: dict = {}
+    source: str = ""
+    trace_id: str = ""
+
+
 class ScenarioRequest(BaseModel):
     battery: float | None = None
     tilt_deg: float | None = None
@@ -426,6 +442,178 @@ def scenario_clear():
 def pipeline_stats():
     """Safety pipeline statistics."""
     return _pipeline.get_stats()
+
+
+# ── Action endpoint ──────────────────────────────────────────────────────
+
+
+class _AllowGate:
+    """Lightweight gate stub for actions that skip the safety pipeline."""
+    decision = "ALLOW"
+    reason = "safe action"
+    rule_id = ""
+    audit_ref = ""
+    params: dict = {}
+
+
+@app.post("/robot/action")
+def robot_action(req: ActionRequest):
+    """Execute a StandardAction on the robot.
+
+    Dispatches by action_type:
+      stop / e_stop   — emergency stop (always allowed)
+      wait / idle     — no-op acknowledgement
+      navigate_to     — drive to target_position {x, y, z}
+      scan            — camera capture
+    All movement actions run through the safety pipeline.
+    """
+    if not _adapter:
+        raise HTTPException(503, "Adapter not initialized")
+
+    _watchdog.heartbeat()
+
+    if _watchdog.in_fallback:
+        return {
+            "status": "denied",
+            "action_id": req.action_id,
+            "action_type": req.action_type,
+            "reason": "SAFE_FALLBACK active — restore heartbeat first",
+            "rule_id": "WATCHDOG-FALLBACK",
+        }
+
+    atype = req.action_type
+
+    # ── stop / e_stop ────────────────────────────────────────────────────
+    if atype in ("stop", "e_stop"):
+        result = _adapter.stop()
+        _push_decision(
+            req.robot_id or f"bridge-{ADAPTER_TYPE}",
+            f"action:{atype}",
+            _AllowGate(),
+        )
+        return {
+            "status": "ok",
+            "action_id": req.action_id,
+            "action_type": atype,
+            "result": result,
+        }
+
+    # ── wait / idle ───────────────────────────────────────────────────────
+    if atype in ("wait", "idle"):
+        return {
+            "status": "ok",
+            "action_id": req.action_id,
+            "action_type": atype,
+        }
+
+    # ── navigate_to ───────────────────────────────────────────────────────
+    if atype == "navigate_to":
+        pos = req.target_position or {}
+        x_m = float(pos.get("x", 0.0))
+        y_m = float(pos.get("y", 0.0))
+        speed = req.target_speed_mps or 0.3
+
+        with _state_lock:
+            state = dict(_latest_state)
+            entities = list(_latest_entities)
+
+        _, _, _, gate = _pipeline.check(speed, 0.0, 0.0, state, entities)
+        robot_id = state.get(
+            "robot_id", req.robot_id or f"bridge-{ADAPTER_TYPE}"
+        )
+        _push_decision(
+            robot_id, f"action:navigate_to ({x_m:.1f},{y_m:.1f})", gate
+        )
+
+        if gate.decision == "DENY":
+            return {
+                "status": "denied",
+                "action_id": req.action_id,
+                "action_type": atype,
+                "reason": gate.reason,
+                "rule_id": gate.rule_id,
+            }
+
+        nav_result = _adapter.navigate_to(x_m, y_m, speed_mps=speed)
+        return {
+            "status": "ok",
+            "action_id": req.action_id,
+            "action_type": atype,
+            "result": nav_result,
+        }
+
+    # ── scan ──────────────────────────────────────────────────────────────
+    if atype == "scan":
+        if hasattr(_adapter, "capture_photo"):
+            photo = _adapter.capture_photo()
+            return {
+                "status": "ok",
+                "action_id": req.action_id,
+                "action_type": atype,
+                "result": photo,
+            }
+        return {
+            "status": "not_supported",
+            "action_id": req.action_id,
+            "action_type": atype,
+            "note": "Camera not available on this adapter",
+        }
+
+    # ── find_and_approach ─────────────────────────────────────────────────
+    if atype == "find_and_approach":
+        return {
+            "status": "not_supported",
+            "action_id": req.action_id,
+            "action_type": atype,
+            "note": (
+                "find_and_approach requires VLM pipeline "
+                "— handled by nl_command_gateway"
+            ),
+        }
+
+    return {
+        "status": "unknown_action",
+        "action_id": req.action_id,
+        "action_type": atype,
+        "note": f"Unknown action_type: {atype}",
+    }
+
+
+# ── LiDAR endpoint ───────────────────────────────────────────────────────
+
+
+@app.get("/lidar/scan")
+def lidar_scan():
+    """Latest LiDAR scan data.
+
+    Returns scan from:
+      1. Adapter get_lidar_scan() if it provides real data
+      2. ROS2 /scan topic presence (detected, not subscribed)
+      3. Error response if no LiDAR found
+    """
+    scan = _adapter.get_lidar_scan() if _adapter else None
+    if scan and scan.get("available"):
+        return scan
+
+    ros = _ros_discover()
+    lidar_caps = ros.get("capabilities", {}).get("lidar", {})
+    if ros.get("available") and lidar_caps.get("ros_available"):
+        topics = lidar_caps.get("topics", [])
+        return {
+            "available": True,
+            "source": "ros2_detected",
+            "topics": topics,
+            "note": (
+                "LiDAR detected via ROS2 discovery. "
+                "Subscribe to topic directly for scan data."
+            ),
+        }
+
+    return {
+        "available": False,
+        "error": "no_lidar",
+        "note": "LiDAR not detected on this robot",
+    }
 
 
 # ── Voice endpoints ──────────────────────────────────────────────────────

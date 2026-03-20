@@ -18,14 +18,14 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 class ProbeStatus:
-    OK            = "ok"
+    OK = "ok"
     NOT_INSTALLED = "not_installed"
-    DEGRADED      = "degraded"
-    DISCONNECTED  = "disconnected"
-    CRITICAL      = "critical"
-    ERROR         = "error"
-    CLIENT_STT    = "client_stt_fallback"
-    CLIENT_TTS    = "client_tts_fallback"
+    DEGRADED = "degraded"
+    DISCONNECTED = "disconnected"
+    CRITICAL = "critical"
+    ERROR = "error"
+    CLIENT_STT = "client_stt_fallback"
+    CLIENT_TTS = "client_tts_fallback"
 
 
 # Required top-level capability keys.
@@ -54,7 +54,11 @@ def normalize_capabilities(raw: dict) -> dict:
         entry = dict(raw.get(key) or {})
         # Ensure mandatory fields
         entry.setdefault("available", False)
-        entry.setdefault("probe", ProbeStatus.NOT_INSTALLED if not entry["available"] else ProbeStatus.OK)
+        default_probe = (
+            ProbeStatus.NOT_INSTALLED if not entry["available"]
+            else ProbeStatus.OK
+        )
+        entry.setdefault("probe", default_probe)
         entry.setdefault("note", "")
         # health: default to 1.0 when available, 0.0 when not
         if "health" not in entry:
@@ -154,3 +158,40 @@ class RobotAdapter(abc.ABC):
 
         Default: no-op.
         """
+
+    # ── High-level actions (optional — default not_supported) ─────────────
+
+    def navigate_to(
+        self,
+        x_m: float,
+        y_m: float,
+        heading_rad: float = 0.0,
+        speed_mps: float = 0.3,
+    ) -> dict:
+        """Navigate to absolute position (x_m, y_m) in the robot's world frame.
+
+        Override in adapters that have a navigation stack (ROS2 Nav2, etc.).
+        Default: not supported.
+        """
+        return {
+            "status": "not_supported",
+            "adapter": self.name,
+            "note": "This adapter does not implement navigate_to",
+        }
+
+    def get_lidar_scan(self) -> dict:
+        """Return latest LiDAR scan data.
+
+        Returns a dict with:
+            available (bool), source (str), ranges (list[float]),
+            angle_min_rad, angle_max_rad, angle_increment_rad,
+            range_min_m, range_max_m, timestamp_s
+
+        Override in adapters with a real LiDAR sensor.
+        Default: not installed.
+        """
+        return {
+            "available": False,
+            "error": "not_installed",
+            "adapter": self.name,
+        }
