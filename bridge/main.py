@@ -63,6 +63,9 @@ ACTIVATION_SERVER = os.getenv(
     "ACTIVATION_SERVER", "https://activate.partenit.ai"
 )
 DECISION_LOG_URL = os.getenv("DECISION_LOG_URL", "")  # e.g. http://decision_log:9114
+# Watchdog: how long with no heartbeat before SAFE_FALLBACK.
+# Live robot: 800ms. Sim/dev: increase to avoid false positives during idle gaps.
+WATCHDOG_TIMEOUT_MS = int(os.getenv("WATCHDOG_TIMEOUT_MS", "800"))
 
 
 # ── Decision log push ─────────────────────────────────────────────────────
@@ -142,9 +145,9 @@ def _on_watchdog_fallback():
     # Push SAFE_FALLBACK event to decision_log
     class _FallbackGate:
         decision = "DENY"
-        reason = "SAFE_FALLBACK: watchdog timeout (800ms no heartbeat)"
+        reason = f"SAFE_FALLBACK: watchdog timeout ({WATCHDOG_TIMEOUT_MS}ms no heartbeat)"
         rule_id = "WATCHDOG-FALLBACK"
-        audit_ref = "claude.md §0.1 (fail-safe on connectivity loss)"
+        audit_ref = "ISO 13482:2014 §5.4.2 (fail-safe on connectivity loss)"
         params = {}
     _push_decision("watchdog", "SAFE_FALLBACK", _FallbackGate())
 
@@ -154,6 +157,7 @@ def _on_watchdog_recover():
 
 
 _watchdog = EdgeWatchdog(
+    timeout_ms=WATCHDOG_TIMEOUT_MS,
     on_fallback=_on_watchdog_fallback,
     on_recover=_on_watchdog_recover,
 )
