@@ -1,0 +1,58 @@
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix rm:   <https://ontology.partenit.ai/robomind#> .
+@prefix od:   <https://ontology.partenit.ai/outdoor#> .
+
+<https://ontology.partenit.ai/outdoor>
+    a owl:Ontology ;
+    owl:imports <https://ontology.partenit.ai/robomind> ;
+    rdfs:label "Outdoor Environment Ontology"@en ;
+    rdfs:comment "Domain ontology for outdoor robot deployments (security, delivery, construction)."@en ;
+    owl:versionInfo "1.0.0" .
+
+od:PedestrianArea a owl:Class ;
+    rdfs:subClassOf rm:SafetyZone ;
+    rdfs:label "PedestrianArea"@en ;
+    rm:maxSpeedMps "0.5"^^xsd:double ;
+    rm:minClearanceM "2.0"^^xsd:double .
+
+od:RoadZone a owl:Class ;
+    rdfs:subClassOf rm:Zone ;
+    rdfs:label "RoadZone"@en ;
+    rm:maxSpeedMps "2.0"^^xsd:double .
+
+od:RestrictedArea a owl:Class ;
+    rdfs:subClassOf rm:SafetyZone ;
+    rdfs:label "RestrictedArea"@en ;
+    rm:accessLevel "2"^^xsd:integer .
+
+od:ForbiddenZone a owl:Class ;
+    rdfs:subClassOf rm:SafetyZone ;
+    rdfs:label "ForbiddenZone"@en ;
+    rm:accessLevel "3"^^xsd:integer .
+
+od:PatrolPath a owl:Class ;
+    rdfs:subClassOf rm:Zone ;
+    rdfs:label "PatrolPath"@en .
+
+od:Building a owl:Class ;
+    rdfs:subClassOf rm:PhysicalEntity ;
+    rdfs:label "Building"@en .
+
+od:Pedestrian a owl:Class ;
+    rdfs:subClassOf rm:DynamicEntity ;
+    rdfs:label "Pedestrian"@en .
+
+od:Vehicle a owl:Class ;
+    rdfs:subClassOf rm:DynamicEntity ;
+    rdfs:label "Vehicle"@en .
+
+od:rule_pedestrian_speed a rm:ConstraintRule ;
+    rm:stlFormula "G(inPedestrianArea → speed < 0.5)" ;
+    rm:constraintSource "regulation" .
+
+od:rule_forbidden_zone a rm:ConstraintRule ;
+    rm:stlFormula "G(NOT inForbiddenZone)" ;
+    rm:constraintSource "regulation" .

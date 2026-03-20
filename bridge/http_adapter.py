@@ -8,8 +8,10 @@ import time
 import urllib.request
 import urllib.error
 
+from bridge.adapter_base import RobotAdapter
 
-class HttpAdapter:
+
+class HttpAdapter(RobotAdapter):
     """Connects to Noetix N2 via HTTP REST API."""
 
     def __init__(self, robot_url: str = "http://192.168.1.100:8000"):

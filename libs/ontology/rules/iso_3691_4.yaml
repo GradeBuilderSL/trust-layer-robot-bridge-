@@ -1,0 +1,710 @@
+---
+# ISO 3691-4:2023 — Driverless industrial trucks and their systems
+# Priority standard for AMR/AGV safety. This file is intentionally partial;
+# many sections are marked TODO and should be expanded in future revisions.
+
+rules:
+
+  # ── EMERGENCY ──────────────────────────────────────────────────────────
+
+  - id: ISO3691-4-ESTOP-001
+    name: "Emergency stop activated"
+    layer: emergency
+    standard: "ISO 3691-4:2023"
+    section: "4.4.1"
+    audit_ref: "ISO 3691-4:2023 §4.4.1"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.4.1"
+      standard: "ISO"
+    condition:
+      field: robot.is_e_stopped
+      operator: eq
+      value: true
+    action:
+      type: stop
+      params:
+        reason: "Emergency stop activated (ISO 3691-4:2023 §4.4.1)"
+      override: true
+    explanation: "Emergency stop input active — all motion shall cease (ISO 3691-4:2023 §4.4.1)."
+    tags: [iso3691_4, estop, emergency]
+
+  - id: ISO3691-4-SAFETY-FAULT-001
+    name: "Stop on safety system fault"
+    layer: emergency
+    standard: "ISO 3691-4:2023"
+    section: "4.4.1"
+    audit_ref: "ISO 3691-4:2023 §4.4.1"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.4.1"
+      standard: "ISO"
+    condition:
+      field: robot.safety_system_ok
+      operator: eq
+      value: false
+    action:
+      type: stop
+      params:
+        reason: "Safety-related control system fault (ISO 3691-4:2023 §4.4.1)"
+      override: true
+    explanation: "Safety-related control failure requires immediate protective stop (ISO 3691-4:2023 §4.4.1)."
+    tags: [iso3691_4, safety_ctrl, emergency]
+
+  # ── HARD CONSTRAINTS ───────────────────────────────────────────────────
+
+  - id: ISO3691-4-SPEED-OPERATING-001
+    name: "Speed limit in operating zone"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.5.2"
+    audit_ref: "ISO 3691-4:2023 §4.5.2"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.5.2"
+      standard: "ISO"
+    condition:
+      and:
+        - field: zone.zone_type
+          operator: eq
+          value: "operating"
+        - field: action.speed_mps
+          operator: gt
+          value: 1.2
+    forbidden_actions: [navigate]
+    explanation: "Operating zone where personnel may be present: speed must not exceed 1.2 m/s (ISO 3691-4:2023 §4.5.2)."
+    tags: [iso3691_4, speed, operating_zone]
+
+  - id: ISO3691-4-SPEED-TRANSITION-001
+    name: "Speed limit in transition zone"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.5.2"
+    audit_ref: "ISO 3691-4:2023 §4.5.2"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.5.2"
+      standard: "ISO"
+    condition:
+      and:
+        - field: zone.zone_type
+          operator: eq
+          value: "transition"
+        - field: action.speed_mps
+          operator: gt
+          value: 0.3
+    forbidden_actions: [navigate]
+    explanation: "Transition between restricted and operating zones: speed reduced to ≤0.3 m/s (ISO 3691-4:2023 §4.5.2)."
+    tags: [iso3691_4, speed, transition_zone]
+
+  - id: ISO3691-4-OVERSPEED-001
+    name: "Overspeed detection — protective stop"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.5.3"
+    audit_ref: "ISO 3691-4:2023 §4.5.3"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.5.3"
+      standard: "ISO"
+    # Overspeed detection modeled as boolean derived by upstream planner/controller:
+    # action.overspeed_flag == true → command exceeds rated speed.
+    condition:
+      field: action.overspeed_flag
+      operator: eq
+      value: true
+    forbidden_actions: [navigate]
+    explanation: "Detected speed above rated speed → protective stop per ISO 3691-4:2023 §4.5.3."
+    tags: [iso3691_4, overspeed]
+
+  - id: ISO3691-4-STABILITY-TILT-001
+    name: "Lateral tilt limit exceeded"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.3"
+    audit_ref: "ISO 3691-4:2023 §4.3"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.3"
+      standard: "ISO"
+    condition:
+      field: robot.tilt_deg
+      operator: gt
+      value: 20.0
+    forbidden_actions: [navigate]
+    explanation: "Stability limit exceeded: lateral tilt above configured max_tilt_deg (ISO 3691-4:2023 §4.3)."
+    tags: [iso3691_4, stability, tilt]
+
+  - id: ISO3691-4-ZONE-RESTRICTED-001
+    name: "Restricted zone access denied"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.2"
+    audit_ref: "ISO 3691-4:2023 §4.2"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.2"
+      standard: "ISO"
+    condition:
+      and:
+        - field: target_zone.zone_type
+          operator: eq
+          value: "restricted"
+        - field: zone.humans_present
+          operator: eq
+          value: true
+    forbidden_actions: [navigate]
+    explanation: "Restricted zones must not be entered when personnel may be present (ISO 3691-4:2023 §4.2)."
+    tags: [iso3691_4, zone, restricted]
+
+  - id: ISO3691-4-PERSONNEL-STOP-001
+    name: "Personnel detection — protective stop"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.6"
+    audit_ref: "ISO 3691-4:2023 §4.6"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.6"
+      standard: "ISO"
+    condition:
+      and:
+        - field: zone.humans_present
+          operator: eq
+          value: true
+        - field: robot.personnel_detection_active
+          operator: eq
+          value: true
+        - field: robot.braking_distance_m
+          operator: gt
+          value: "robot.available_distance_m"
+    forbidden_actions: [navigate]
+    explanation: "Detected person within braking distance; protective stop per ISO 3691-4:2023 §4.6."
+    tags: [iso3691_4, personnel, stop]
+
+  - id: ISO3691-4-OBSTACLE-001
+    name: "Obstacle detection — stop in forward path"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.7"
+    audit_ref: "ISO 3691-4:2023 §4.7"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.7"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.obstacle_in_path
+          operator: eq
+          value: true
+        - field: robot.obstacle_distance_m
+          operator: lt
+          value: "robot.braking_distance_m"
+    forbidden_actions: [navigate]
+    explanation: "Obstacle in forward detection zone within braking distance; navigation blocked per ISO 3691-4:2023 §4.7."
+    tags: [iso3691_4, obstacle, detection]
+
+  - id: ISO3691-4-CHARGE-SAFETY-001
+    name: "Automatic charging safety — no motion during charge"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.8"
+    audit_ref: "ISO 3691-4:2023 §4.8"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.8"
+      standard: "ISO"
+    condition:
+      field: robot.is_charging
+      operator: eq
+      value: true
+    forbidden_actions: [navigate, pick, place]
+    explanation: "Robot must not move while automatic charging is active (ISO 3691-4:2023 §4.8)."
+    tags: [iso3691_4, charging, safety]
+
+  # ── Section 4.6 — Personnel detection (additional) ────────────────────
+
+  - id: ISO3691-4-PERSONNEL-SLOW-001
+    name: "Personnel detected in warning zone — speed reduction"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.6"
+    audit_ref: "ISO 3691-4:2023 §4.6"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.6"
+      standard: "ISO"
+    condition:
+      and:
+        - field: zone.humans_present
+          operator: eq
+          value: true
+        - field: robot.min_human_distance_m
+          operator: lt
+          value: 5.0
+        - field: robot.min_human_distance_m
+          operator: gt
+          value: "robot.braking_distance_m"
+    action:
+      type: limit_speed
+      params:
+        max_speed_mps: 0.3
+        reason: "Person in warning zone — speed limited to 0.3 m/s (ISO 3691-4:2023 §4.6)"
+    explanation: "Person detected beyond braking distance but within 5m warning zone; speed reduced to ≤0.3 m/s (ISO 3691-4:2023 §4.6)."
+    tags: [iso3691_4, personnel, slow, warning_zone]
+
+  - id: ISO3691-4-PERSONNEL-DETECT-FAIL-001
+    name: "Personnel detection system failure — protective stop"
+    layer: emergency
+    standard: "ISO 3691-4:2023"
+    section: "4.6"
+    audit_ref: "ISO 3691-4:2023 §4.6"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.6"
+      standard: "ISO"
+    condition:
+      field: robot.personnel_detection_ok
+      operator: eq
+      value: false
+    action:
+      type: stop
+      params:
+        reason: "Personnel detection system failure — protective stop (ISO 3691-4:2023 §4.6)"
+      override: true
+    explanation: "Personnel detection system fault — robot cannot guarantee safe detection; protective stop required (ISO 3691-4:2023 §4.6)."
+    tags: [iso3691_4, personnel, detection_failure, emergency]
+
+  - id: ISO3691-4-PERSONNEL-REVERSE-001
+    name: "Rear personnel detection during reverse travel"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.6"
+    audit_ref: "ISO 3691-4:2023 §4.6"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.6"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.direction
+          operator: eq
+          value: "reverse"
+        - field: robot.rear_detection_ok
+          operator: eq
+          value: false
+    forbidden_actions: [navigate]
+    explanation: "Reverse travel requires rear personnel detection with same reliability as forward detection (ISO 3691-4:2023 §4.6)."
+    tags: [iso3691_4, personnel, reverse, detection]
+
+  - id: ISO3691-4-PERSONNEL-SIDE-001
+    name: "Side personnel detection during lateral movement"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.6"
+    audit_ref: "ISO 3691-4:2023 §4.6"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.6"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.direction
+          operator: eq
+          value: "lateral"
+        - field: robot.side_detection_ok
+          operator: eq
+          value: false
+    forbidden_actions: [navigate]
+    explanation: "Lateral movement requires side personnel detection active (ISO 3691-4:2023 §4.6)."
+    tags: [iso3691_4, personnel, lateral, detection]
+
+  - id: ISO3691-4-PERSONNEL-HYPOTHESIS-001
+    name: "Hypothetical human entity — treat as real person"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.6"
+    audit_ref: "ISO 3691-4:2023 §4.6"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.6"
+      standard: "ISO"
+    condition:
+      and:
+        - field: entity.status
+          operator: eq
+          value: "hypothesis"
+        - field: entity.semantic_type
+          operator: eq
+          value: "human"
+    action:
+      type: limit_speed
+      params:
+        max_speed_mps: 0.3
+        reason: "Hypothetical human entity — conservative treatment (ISO 3691-4:2023 §4.6)"
+    explanation: "Entity with status=hypothesis and semantic_type=human shall be treated as real person (ISO 3691-4:2023 §4.6)."
+    tags: [iso3691_4, personnel, hypothesis, world_model]
+
+  # ── Section 4.7 — Obstacle detection (additional) ───────────────────
+
+  - id: ISO3691-4-OBSTACLE-FORWARD-001
+    name: "Forward obstacle detection zone depth"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.7"
+    audit_ref: "ISO 3691-4:2023 §4.7"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.7"
+      standard: "ISO"
+    condition:
+      field: robot.forward_detection_range_m
+      operator: lt
+      value: "robot.required_detection_distance_m"
+    action:
+      type: limit_speed
+      params:
+        reason: "Forward detection range insufficient for current speed (ISO 3691-4:2023 §4.7)"
+    explanation: "Obstacle detection zone depth must be ≥ braking distance + margin; reduce speed if sensor range insufficient (ISO 3691-4:2023 §4.7)."
+    tags: [iso3691_4, obstacle, detection_range]
+
+  - id: ISO3691-4-OBSTACLE-UNKNOWN-001
+    name: "Unknown obstacle — conservative speed limit"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.7"
+    audit_ref: "ISO 3691-4:2023 §4.7"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.7"
+      standard: "ISO"
+    condition:
+      and:
+        - field: entity.anomaly_type
+          operator: eq
+          value: "unexpected_new"
+        - field: entity.in_path
+          operator: eq
+          value: true
+    action:
+      type: limit_speed
+      params:
+        max_speed_mps: 0.3
+        reason: "Unknown object in path — conservative speed limit (ISO 3691-4:2023 §4.7)"
+        notify: true
+    explanation: "Unrecognized new object in forward path — limit speed to 0.3 m/s and notify operator (ISO 3691-4:2023 §4.7)."
+    tags: [iso3691_4, obstacle, unknown, anomaly]
+
+  - id: ISO3691-4-OBSTACLE-CLEARANCE-001
+    name: "Minimum clearance when passing obstacle"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.7"
+    audit_ref: "ISO 3691-4:2023 §4.7"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.7"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.obstacle_clearance_m
+          operator: lt
+          value: 0.5
+        - field: robot.is_moving
+          operator: eq
+          value: true
+    forbidden_actions: [navigate]
+    explanation: "Minimum clearance of 0.5m required when passing obstacles (ISO 3691-4:2023 §4.7)."
+    tags: [iso3691_4, obstacle, clearance]
+
+  - id: ISO3691-4-OBSTACLE-SENSOR-RANGE-001
+    name: "Sensor range insufficient for current speed"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.7"
+    audit_ref: "ISO 3691-4:2023 §4.7"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.7"
+      standard: "ISO"
+    condition:
+      field: robot.sensor_range_m
+      operator: lt
+      value: "robot.required_detection_distance_m"
+    action:
+      type: limit_speed
+      params:
+        reason: "Sensor range < required detection distance for current speed (ISO 3691-4:2023 §4.7)"
+    explanation: "If sensor range is less than required detection distance for current speed — reduce speed (ISO 3691-4:2023 §4.7)."
+    tags: [iso3691_4, obstacle, sensor_range]
+
+  - id: ISO3691-4-OBSTACLE-LOWCONF-001
+    name: "Low-confidence obstacle — conservative treatment"
+    layer: policy
+    standard: "ISO 3691-4:2023"
+    section: "4.7"
+    audit_ref: "ISO 3691-4:2023 §4.7"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.7"
+      standard: "ISO"
+    condition:
+      and:
+        - field: entity.confidence
+          operator: lt
+          value: 0.5
+        - field: entity.confidence
+          operator: gt
+          value: 0.15
+        - field: entity.in_path
+          operator: eq
+          value: true
+    penalty: 15
+    explanation: "Obstacle with confidence 0.15–0.5 in path — treat as real obstacle conservatively (ISO 3691-4:2023 §4.7)."
+    tags: [iso3691_4, obstacle, low_confidence, conservative]
+
+  # ── Section 4.8 — Charging safety (additional) ──────────────────────
+
+  - id: ISO3691-4-CHARGE-ZONE-001
+    name: "Speed limit in charging zone"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.8"
+    audit_ref: "ISO 3691-4:2023 §4.8"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.8"
+      standard: "ISO"
+    condition:
+      and:
+        - field: zone.zone_type
+          operator: eq
+          value: "charging"
+        - field: action.speed_mps
+          operator: gt
+          value: 0.1
+    action:
+      type: limit_speed
+      params:
+        max_speed_mps: 0.1
+        reason: "Charging zone — max speed 0.1 m/s (ISO 3691-4:2023 §4.8)"
+    explanation: "In charging zone speed must not exceed 0.1 m/s (ISO 3691-4:2023 §4.8)."
+    tags: [iso3691_4, charging, zone, speed]
+
+  - id: ISO3691-4-CHARGE-PERSONNEL-001
+    name: "Person in charging zone — interrupt charging"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.8"
+    audit_ref: "ISO 3691-4:2023 §4.8"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.8"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.is_charging
+          operator: eq
+          value: true
+        - field: zone.humans_present
+          operator: eq
+          value: true
+    action:
+      type: stop
+      params:
+        reason: "Person detected in charging zone — interrupt charging (ISO 3691-4:2023 §4.8)"
+        disconnect_charger: true
+    explanation: "Person detected in charging zone — interrupt charging and stop (ISO 3691-4:2023 §4.8)."
+    tags: [iso3691_4, charging, personnel, safety]
+
+  - id: ISO3691-4-CHARGE-VOLTAGE-001
+    name: "Charging contacts active only when connected"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.8"
+    audit_ref: "ISO 3691-4:2023 §4.8"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.8"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.charging_contacts_active
+          operator: eq
+          value: true
+        - field: robot.charger_connected
+          operator: eq
+          value: false
+    action:
+      type: stop
+      params:
+        reason: "Charging contacts active without charger connection — fault (ISO 3691-4:2023 §4.8)"
+    explanation: "Charging contacts shall only be energized when properly connected to charging device (ISO 3691-4:2023 §4.8)."
+    tags: [iso3691_4, charging, voltage, safety]
+
+  - id: ISO3691-4-CHARGE-FAULT-001
+    name: "Charging system fault — disconnect and notify"
+    layer: policy
+    standard: "ISO 3691-4:2023"
+    section: "4.8"
+    audit_ref: "ISO 3691-4:2023 §4.8"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.8"
+      standard: "ISO"
+    condition:
+      field: robot.charging_fault
+      operator: eq
+      value: true
+    action:
+      type: notify
+      params:
+        reason: "Charging system fault — disconnect and notify operator (ISO 3691-4:2023 §4.8)"
+        disconnect_charger: true
+    explanation: "Fault in charging system — disconnect from charger and notify operator (ISO 3691-4:2023 §4.8)."
+    tags: [iso3691_4, charging, fault, notify]
+
+  # ── Additional rules for completeness ───────────────────────────────
+
+  - id: ISO3691-4-BRAKE-TEST-001
+    name: "Periodic braking system test"
+    layer: policy
+    standard: "ISO 3691-4:2023"
+    section: "4.4.2"
+    audit_ref: "ISO 3691-4:2023 §4.4.2"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.4.2"
+      standard: "ISO"
+    condition:
+      field: robot.brake_test_overdue
+      operator: eq
+      value: true
+    penalty: 12
+    explanation: "Periodic braking system test overdue — schedule test (ISO 3691-4:2023 §4.4.2)."
+    tags: [iso3691_4, braking, test, advisory]
+
+  - id: ISO3691-4-LOAD-STABILITY-001
+    name: "Load carrying — tightened speed and tilt limits"
+    layer: policy
+    standard: "ISO 3691-4:2023"
+    section: "4.3"
+    audit_ref: "ISO 3691-4:2023 §4.3"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.3"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.carrying_load
+          operator: eq
+          value: true
+        - field: action.speed_mps
+          operator: gt
+          value: 0.8
+    action:
+      type: limit_speed
+      params:
+        max_speed_mps: 0.8
+        reason: "Carrying load — tightened speed limit (ISO 3691-4:2023 §4.3)"
+    explanation: "When carrying load, speed and tilt limits are tightened for stability (ISO 3691-4:2023 §4.3)."
+    tags: [iso3691_4, load, stability, speed]
+
+  - id: ISO3691-4-MANUAL-MODE-001
+    name: "Manual mode — rated manual speed limit"
+    layer: hard
+    standard: "ISO 3691-4:2023"
+    section: "4.5.1"
+    audit_ref: "ISO 3691-4:2023 §4.5.1"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.5.1"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.mode
+          operator: eq
+          value: "manual"
+        - field: action.speed_mps
+          operator: gt
+          value: "robot.rated_manual_speed_mps"
+    forbidden_actions: [navigate]
+    explanation: "In manual mode, maximum speed shall not exceed rated manual speed (ISO 3691-4:2023 §4.5.1)."
+    tags: [iso3691_4, manual_mode, speed]
+
+  # ── POLICY (SHOULD) ────────────────────────────────────────────────────
+
+  - id: ISO3691-4-MAINTENANCE-001
+    name: "Maintenance interval advisory"
+    layer: policy
+    standard: "ISO 3691-4:2023"
+    section: "4.9"
+    audit_ref: "ISO 3691-4:2023 §4.9"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 3691-4:2023"
+      section: "4.9"
+      standard: "ISO"
+    condition:
+      field: robot.operation_hours
+      operator: gt
+      value: "robot.maintenance_interval_hours"
+    penalty: 10
+    explanation: "Operation hours exceed maintenance interval — advisory to schedule maintenance (ISO 3691-4:2023 §4.9)."
+    tags: [iso3691_4, maintenance, advisory]
+

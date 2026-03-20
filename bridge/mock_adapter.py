@@ -9,8 +9,10 @@ import random
 import time
 import threading
 
+from bridge.adapter_base import RobotAdapter
 
-class MockAdapter:
+
+class MockAdapter(RobotAdapter):
     """Simulates a Noetix N2 robot with realistic physics."""
 
     MAX_SPEED = 0.8      # m/s

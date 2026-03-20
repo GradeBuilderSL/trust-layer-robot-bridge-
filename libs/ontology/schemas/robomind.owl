@@ -1,0 +1,146 @@
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix rm:   <https://ontology.partenit.ai/robomind#> .
+
+# ─── Ontology Header ───────────────────────────────────────────────────────
+<https://ontology.partenit.ai/robomind>
+    a owl:Ontology ;
+    rdfs:label "RoboMind Upper Ontology"@en ;
+    rdfs:comment "Upper ontology for trust-layer. Shared concepts for all robot environments."@en ;
+    owl:versionInfo "1.0.0" .
+
+# ─── Core Classes ──────────────────────────────────────────────────────────
+
+rm:PhysicalEntity a owl:Class ;
+    rdfs:label "PhysicalEntity"@en ;
+    rdfs:comment "Any physical object in the environment."@en .
+
+rm:Zone a owl:Class ;
+    rdfs:subClassOf rm:PhysicalEntity ;
+    rdfs:label "Zone"@en ;
+    rdfs:comment "A spatial region with associated semantic properties and constraints."@en .
+
+rm:DynamicEntity a owl:Class ;
+    rdfs:subClassOf rm:PhysicalEntity ;
+    rdfs:label "DynamicEntity"@en ;
+    rdfs:comment "Entity that moves or changes state (humans, robots, vehicles)."@en .
+
+rm:SafetyZone a owl:Class ;
+    rdfs:subClassOf rm:Zone ;
+    rdfs:label "SafetyZone"@en ;
+    rdfs:comment "Zone where strict safety constraints apply."@en .
+
+rm:Waypoint a owl:Class ;
+    rdfs:label "Waypoint"@en ;
+    rdfs:comment "A named navigation point in the environment."@en .
+
+rm:NavigationEdge a owl:Class ;
+    rdfs:label "NavigationEdge"@en ;
+    rdfs:comment "A navigable passage between two waypoints."@en .
+
+rm:ConstraintRule a owl:Class ;
+    rdfs:label "ConstraintRule"@en ;
+    rdfs:comment "A safety or operational constraint, optionally expressed as STL formula."@en .
+
+rm:RobotProfile a owl:Class ;
+    rdfs:label "RobotProfile"@en ;
+    rdfs:comment "Physical and kinematic profile of a robot type."@en .
+
+# ─── Object Properties ─────────────────────────────────────────────────────
+
+rm:partOf a owl:ObjectProperty ;
+    rdfs:domain rm:PhysicalEntity ;
+    rdfs:range  rm:PhysicalEntity ;
+    rdfs:label "partOf"@en .
+
+rm:adjacentTo a owl:ObjectProperty, owl:SymmetricProperty ;
+    rdfs:domain rm:Zone ;
+    rdfs:range  rm:Zone ;
+    rdfs:label "adjacentTo"@en .
+
+rm:connectedTo a owl:ObjectProperty ;
+    rdfs:domain rm:Waypoint ;
+    rdfs:range  rm:Waypoint ;
+    rdfs:label "connectedTo"@en .
+
+rm:locatedIn a owl:ObjectProperty ;
+    rdfs:domain rm:PhysicalEntity ;
+    rdfs:range  rm:Zone ;
+    rdfs:label "locatedIn"@en .
+
+rm:hasConstraint a owl:ObjectProperty ;
+    rdfs:domain rm:Zone ;
+    rdfs:range  rm:ConstraintRule ;
+    rdfs:label "hasConstraint"@en .
+
+rm:governs a owl:ObjectProperty ;
+    rdfs:domain rm:ConstraintRule ;
+    rdfs:range  rm:Zone ;
+    rdfs:label "governs"@en .
+
+rm:from a owl:ObjectProperty ;
+    rdfs:domain rm:NavigationEdge ;
+    rdfs:range  rm:Waypoint ;
+    rdfs:label "from"@en .
+
+rm:to a owl:ObjectProperty ;
+    rdfs:domain rm:NavigationEdge ;
+    rdfs:range  rm:Waypoint ;
+    rdfs:label "to"@en .
+
+rm:inZone a owl:ObjectProperty ;
+    rdfs:domain rm:Waypoint ;
+    rdfs:range  rm:Zone ;
+    rdfs:label "inZone"@en .
+
+# ─── Datatype Properties ───────────────────────────────────────────────────
+
+rm:maxSpeedMps a owl:DatatypeProperty ;
+    rdfs:domain rm:Zone ;
+    rdfs:range  xsd:double ;
+    rdfs:label "maxSpeedMps"@en .
+
+rm:minClearanceM a owl:DatatypeProperty ;
+    rdfs:domain rm:Zone ;
+    rdfs:range  xsd:double ;
+    rdfs:label "minClearanceM"@en .
+
+rm:accessLevel a owl:DatatypeProperty ;
+    rdfs:domain rm:Zone ;
+    rdfs:range  xsd:integer ;
+    rdfs:label "accessLevel"@en ;
+    rdfs:comment "0=unrestricted, 1=authorised, 2=restricted, 3=forbidden"@en .
+
+rm:stlFormula a owl:DatatypeProperty ;
+    rdfs:domain rm:ConstraintRule ;
+    rdfs:range  xsd:string ;
+    rdfs:label "stlFormula"@en .
+
+rm:constraintSource a owl:DatatypeProperty ;
+    rdfs:domain rm:ConstraintRule ;
+    rdfs:range  xsd:string ;
+    rdfs:label "constraintSource"@en ;
+    rdfs:comment "operator | learned | regulation"@en .
+
+rm:widthM a owl:DatatypeProperty ;
+    rdfs:domain rm:NavigationEdge ;
+    rdfs:range  xsd:double ;
+    rdfs:label "widthM"@en .
+
+rm:posX a owl:DatatypeProperty ;
+    rdfs:domain rm:Waypoint ;
+    rdfs:range  xsd:double .
+
+rm:posY a owl:DatatypeProperty ;
+    rdfs:domain rm:Waypoint ;
+    rdfs:range  xsd:double .
+
+rm:posZ a owl:DatatypeProperty ;
+    rdfs:domain rm:Waypoint ;
+    rdfs:range  xsd:double .
+
+rm:label a owl:DatatypeProperty ;
+    rdfs:domain rm:PhysicalEntity ;
+    rdfs:range  xsd:string .

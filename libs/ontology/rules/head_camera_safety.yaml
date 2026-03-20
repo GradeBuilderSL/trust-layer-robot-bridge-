@@ -1,0 +1,113 @@
+# Head/Camera Control Safety Rules
+# Action types: head_pan, head_tilt, look_at_point, look_at_object
+#
+# These rules enforce safe head/camera movement in various contexts.
+# Head movements can startle humans, cause mechanical damage if limits exceeded,
+# and must stop during emergencies.
+
+rules:
+
+  # ── EMERGENCY ──────────────────────────────────────────────────────────
+
+  - id: HEAD-ESTOP-001
+    name: "No head movement during e-stop"
+    layer: emergency
+    standard: "ISO"
+    section: "10218-1:5.4.1"
+    audit_ref: "ISO 10218-1:2011 §5.4.1"
+    condition:
+      field: robot.is_e_stopped
+      operator: eq
+      value: true
+    action:
+      type: stop
+      params:
+        reason: "E-stop active — all motion including head/camera prohibited"
+      override: true
+    forbidden_actions: [head_pan, head_tilt, look_at_point, look_at_object]
+    explanation: "During emergency stop, all actuators including head servos must be halted"
+    tags: [head, camera, estop, emergency]
+
+  - id: HEAD-SENSOR-FAILURE-001
+    name: "No head movement on sensor failure"
+    layer: emergency
+    standard: "ISO"
+    section: "10218-1:5.4.2"
+    audit_ref: "ISO 10218-1:2011 §5.4.2"
+    condition:
+      field: robot.sensor_ok
+      operator: eq
+      value: false
+    action:
+      type: stop
+      params:
+        reason: "Sensor failure — head/camera movement unsafe without feedback"
+      override: true
+    forbidden_actions: [head_pan, head_tilt, look_at_point, look_at_object]
+    explanation: "Head movement without sensor feedback may cause mechanical damage or miss safety events"
+    tags: [head, camera, sensor, emergency]
+
+  # ── HARD CONSTRAINTS ─────────────────────────────────────────────────
+
+  - id: HEAD-RESTRICTED-ZONE-001
+    name: "No head/camera control in restricted zones"
+    layer: hard
+    standard: "Internal"
+    section: "restricted_ops"
+    audit_ref: "Internal policy: restricted zone operations"
+    condition:
+      field: zone.access_level
+      operator: gt
+      value: 2
+    forbidden_actions: [head_pan, head_tilt, look_at_point, look_at_object]
+    explanation: "Restricted zones (access_level > 2) prohibit active perception to prevent surveillance or interference"
+    tags: [head, camera, zone, restricted]
+
+  - id: HEAD-GUARDED-ZONE-HUMAN-001
+    name: "No head movement in guarded zone with humans"
+    layer: hard
+    standard: "ISO"
+    section: "10218-2:5.10"
+    audit_ref: "ISO 10218-2:2011 §5.10"
+    condition:
+      and:
+        - field: zone.guarded
+          operator: eq
+          value: true
+        - field: zone.humans_present
+          operator: eq
+          value: true
+    forbidden_actions: [head_pan, head_tilt, look_at_point, look_at_object]
+    explanation: "In guarded zones with humans present, head movement may startle or indicate intent to act"
+    tags: [head, camera, hri, guarded]
+
+  - id: HEAD-CHARGING-001
+    name: "No head movement while charging"
+    layer: hard
+    standard: "Internal"
+    section: "hardware_safety"
+    audit_ref: "Internal: charging dock mechanical clearance"
+    condition:
+      field: robot.is_charging
+      operator: eq
+      value: true
+    forbidden_actions: [head_pan, head_tilt, look_at_point, look_at_object]
+    explanation: "Head movement while docked/charging may damage charging connectors or dock mechanism"
+    tags: [head, camera, charging, hardware]
+
+  # ── POLICY ───────────────────────────────────────────────────────────
+
+  - id: HEAD-SLOW-NEAR-HUMAN-001
+    name: "Slow head movement when humans nearby"
+    layer: policy
+    standard: "ISO"
+    section: "13482:5.5"
+    audit_ref: "ISO 13482:2014 §5.5"
+    condition:
+      field: zone.humans_present
+      operator: eq
+      value: true
+    forbidden_actions: []
+    penalty: 15
+    explanation: "When humans are present, head movements should be slow and predictable to avoid startling"
+    tags: [head, camera, hri, policy]

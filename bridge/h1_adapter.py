@@ -22,10 +22,12 @@ import time
 import urllib.error
 import urllib.request
 
+from bridge.adapter_base import RobotAdapter
+
 logger = logging.getLogger(__name__)
 
 
-class H1Adapter:
+class H1Adapter(RobotAdapter):
     """Adapter for Unitree H1 humanoid robot.
 
     Speaks to h1_server.py REST API, which bridges Unitree SDK2 → HTTP.

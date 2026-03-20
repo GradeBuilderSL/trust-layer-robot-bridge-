@@ -36,6 +36,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from bridge.adapter_base import RobotAdapter, normalize_capabilities
 from bridge.mock_adapter import MockAdapter
 from bridge.http_adapter import HttpAdapter
 from bridge.h1_adapter import H1Adapter
@@ -118,6 +119,10 @@ _latest_entities: list[dict] = []
 _poller_thread: threading.Thread | None = None
 _running = False
 _start_time = time.time()
+
+_chat_history: list[dict] = []
+_chat_history_lock = threading.Lock()
+_CHAT_HISTORY_MAX = 100
 
 # ── EdgeWatchdog ──────────────────────────────────────────────────────────────
 # Fires SAFE_FALLBACK if upstream (operator_ui/sim_dashboard) stops heartbeating.
@@ -611,8 +616,8 @@ def robot_capabilities():
     """
     scanned_at = time.time()
 
-    # Use adapter's probe if available (most accurate)
-    if _adapter and hasattr(_adapter, "probe_capabilities"):
+    # Use adapter's probe (guaranteed by RobotAdapter ABC)
+    if _adapter and isinstance(_adapter, RobotAdapter):
         caps = _adapter.probe_capabilities()
     else:
         # Derive from latest polled state as fallback
@@ -672,7 +677,10 @@ def robot_capabilities():
         for ros_cap_key, _ in _ROS_TOPIC_MAP:
             pass  # adapter probes are authoritative; no need to downgrade
 
-    # Readiness score: fraction of subsystems that are available
+    # Normalize: fill missing required fields so all adapters return the same schema
+    caps = normalize_capabilities(caps)
+
+    # Readiness score: fraction of core subsystems that are available
     available_count = sum(1 for c in caps.values() if c.get("available"))
     total = len(caps)
 
@@ -875,9 +883,24 @@ def chat_send(req: ChatSendRequest):
     }
 
 
+def _append_chat(role: str, text: str) -> None:
+    with _chat_history_lock:
+        _chat_history.insert(0, {"role": role, "message": text, "ts": time.time()})
+        if len(_chat_history) > _CHAT_HISTORY_MAX:
+            _chat_history.pop()
+
+
+@app.get("/chat/history")
+def chat_history():
+    """Return recent chat messages (newest first)."""
+    with _chat_history_lock:
+        return list(_chat_history)
+
+
 @app.post("/chat")
 def chat(req: ChatRequest):
     """Q&A chat — routes to local brain when in AUTONOMOUS mode."""
+    _append_chat("user", req.message)
     mode = _connectivity.mode if _connectivity else "CONNECTED"
 
     if mode != "CONNECTED":
@@ -888,6 +911,7 @@ def chat(req: ChatRequest):
             "mode":     mode,
             "ts":       time.time(),
         })
+        _append_chat("robot", answer)
         return {
             "reply":  answer,
             "source": "local_brain",
@@ -910,10 +934,12 @@ def chat(req: ChatRequest):
         )
         with urllib.request.urlopen(request, timeout=10) as resp:
             data = _json.loads(resp.read())
+        _append_chat("robot", data.get("reply", ""))
         return {**data, "source": "workstation_llm", "mode": mode}
     except Exception as exc:
         # LLM unavailable — fall back to local brain
         answer = _brain.answer_question(req.message, req.language)
+        _append_chat("robot", answer)
         return {
             "reply":  answer,
             "source": "local_brain_fallback",

@@ -1,0 +1,326 @@
+---
+# EU Machinery Regulation 2023/1230 — Essential Health & Safety Requirements
+# NOTE: This file is partial; many sections are TODO and should be expanded.
+
+rules:
+
+  - id: EU-MR-AI-LOG-001
+    name: "Safety decision must be logged"
+    layer: policy
+    standard: "EU Machinery Regulation 2023/1230"
+    section: "Annex III, 1.2.1"
+    audit_ref: "EU MR 2023/1230 Annex III §1.2.1"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU Machinery Regulation 2023/1230"
+      section: "Annex III 1.2.1"
+      standard: "Regulation"
+    description: "Data related to safety function decisions must be stored each time a decision is taken."
+    condition:
+      and:
+        - field: safety_decision_made
+          operator: eq
+          value: true
+        - field: safety_decision_logged
+          operator: eq
+          value: false
+    forbidden_actions: []
+    penalty: 50.0
+    explanation: "EU MR: Safety decision taken but not logged — non-compliant with Annex III §1.2.1 (logging requirement)."
+    tags: [eu_mr, logging, ai]
+
+  - id: EU-MR-AMR-SUPERVISOR-001
+    name: "Human supervisor must be connected in FULL mode"
+    layer: policy
+    standard: "EU Machinery Regulation 2023/1230"
+    section: "Annex III, 1.2.1"
+    audit_ref: "EU MR 2023/1230 Annex III §1.2.1"
+    applicable_robots: ["amr", "agv"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU Machinery Regulation 2023/1230"
+      section: "Annex III 1.2.1"
+      standard: "Regulation"
+    description: "Autonomous mobile machinery must provide real-time information to a human supervisor and enable intervention."
+    condition:
+      and:
+        - field: robot.mode
+          operator: eq
+          value: "FULL"
+        - field: robot.supervisor_connected
+          operator: eq
+          value: false
+    forbidden_actions: []
+    penalty: 40.0
+    explanation: "EU MR: FULL autonomous mode without connected supervisor — penalised; system should downgrade or require connection."
+    tags: [eu_mr, supervisor, amr]
+
+  - id: EU-MR-CYBER-001
+    name: "Stop on integrity violation of safety functions"
+    layer: hard
+    standard: "EU Machinery Regulation 2023/1230"
+    section: "Annex III, 1.1.9"
+    audit_ref: "EU MR 2023/1230 Annex III §1.1.9"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU Machinery Regulation 2023/1230"
+      section: "Annex III 1.1.9"
+      standard: "Regulation"
+    description: "Safety functions must be protected against external interference and corruption."
+    condition:
+      field: robot.safety_integrity_ok
+      operator: eq
+      value: false
+    forbidden_actions: [navigate, pick, place, manipulate]
+    explanation: "Integrity check for safety functions failed — all hazardous movements prohibited (EU MR 2023/1230 Annex III §1.1.9)."
+    tags: [eu_mr, cybersecurity, integrity]
+
+  - id: EU-MR-HRI-PREDICTABLE-001
+    name: "Robot actions must be explainable"
+    layer: advisory
+    standard: "EU Machinery Regulation 2023/1230"
+    section: "Annex III, 1.2.1"
+    audit_ref: "EU MR 2023/1230 Annex III §1.2.1"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU Machinery Regulation 2023/1230"
+      section: "Annex III 1.2.1"
+      standard: "Regulation"
+    description: "Robot actions must be predictable and understandable to operators."
+    condition:
+      field: action_explanation_available
+      operator: eq
+      value: false
+    forbidden_actions: []
+    penalty: 5.0
+    explanation: "No explanation for current action available — advisory violation of predictability / explainability requirement."
+    tags: [eu_mr, hri, explainability]
+
+  - id: EU-MR-PSYCHOLOGICAL-STRESS-001
+    name: "Avoid unnecessary psychological stress for humans"
+    layer: advisory
+    standard: "EU Machinery Regulation 2023/1230"
+    section: "Annex III, 1.1.2"
+    audit_ref: "EU MR 2023/1230 Annex III §1.1.2"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU Machinery Regulation 2023/1230"
+      section: "Annex III 1.1.2"
+      standard: "Regulation"
+    description: "Robot behaviour should not cause unnecessary psychological stress or intimidation to nearby humans."
+    condition:
+      field: robot.behaviour_psychologically_stressful
+      operator: eq
+      value: true
+    penalty: 10.0
+    explanation: "Behaviour flagged as potentially intimidating or causing psychological stress; advisory per Annex III §1.1.2."
+    tags: [eu_mr, psychological, hri]
+
+  - id: EU-MR-AI-EVOLVING-001
+    name: "Risk assessment for evolving/self-learning logic"
+    layer: policy
+    standard: "EU Machinery Regulation 2023/1230"
+    section: "Annex III, 1.1.2"
+    audit_ref: "EU MR 2023/1230 Annex III §1.1.2"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU Machinery Regulation 2023/1230"
+      section: "Annex III 1.1.2"
+      standard: "Regulation"
+    condition:
+      and:
+        - field: ai.evolving_behaviour
+          operator: eq
+          value: true
+        - field: ai.risk_assessment_updated
+          operator: eq
+          value: false
+    penalty: 35.0
+    explanation: "AI system with evolving/self-learning logic requires updated risk assessment (EU MR Annex III §1.1.2)."
+    tags: [eu_mr, ai, evolving, risk]
+
+  - id: EU-MR-SW-UPDATE-001
+    name: "Software update affecting safety — reassessment required"
+    layer: policy
+    standard: "EU Machinery Regulation 2023/1230"
+    section: "Annex III, 1.1.9"
+    audit_ref: "EU MR 2023/1230 Annex III §1.1.9"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU Machinery Regulation 2023/1230"
+      section: "Annex III 1.1.9"
+      standard: "Regulation"
+    condition:
+      and:
+        - field: robot.safety_sw_updated
+          operator: eq
+          value: true
+        - field: robot.safety_reassessment_done
+          operator: eq
+          value: false
+    penalty: 40.0
+    explanation: "Safety-affecting software updated without reassessment (EU MR Annex III §1.1.9)."
+    tags: [eu_mr, software_update, reassessment]
+
+  - id: EU-MR-CONTROL-FAILURE-001
+    name: "Control system failure must not create hazard"
+    layer: hard
+    standard: "EU Machinery Regulation 2023/1230"
+    section: "Annex III, 1.2.1"
+    audit_ref: "EU MR 2023/1230 Annex III §1.2.1"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU Machinery Regulation 2023/1230"
+      section: "Annex III 1.2.1"
+      standard: "Regulation"
+    condition:
+      field: robot.control_system_failure
+      operator: eq
+      value: true
+    forbidden_actions: [navigate, pick, place, manipulate]
+    explanation: "Control system failure — all hazardous actions blocked (EU MR Annex III §1.2.1)."
+    tags: [eu_mr, control_failure, safety]
+
+  - id: EU-MR-ENERGY-CUTOFF-001
+    name: "Energy isolation capability required"
+    layer: hard
+    standard: "EU Machinery Regulation 2023/1230"
+    section: "Annex III, 1.6.3"
+    audit_ref: "EU MR 2023/1230 Annex III §1.6.3"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU Machinery Regulation 2023/1230"
+      section: "Annex III 1.6.3"
+      standard: "Regulation"
+    condition:
+      and:
+        - field: robot.energy_isolation_required
+          operator: eq
+          value: true
+        - field: robot.energy_isolation_available
+          operator: eq
+          value: false
+    forbidden_actions: [navigate]
+    explanation: "Energy isolation capability not available — cannot operate safely (EU MR Annex III §1.6.3)."
+    tags: [eu_mr, energy, isolation]
+
+  - id: EU-MR-EMERGENCY-STOP-001
+    name: "Emergency stop — ISO 13850 compliant"
+    layer: emergency
+    standard: "EU Machinery Regulation 2023/1230"
+    section: "Annex III, 1.2.4.3"
+    audit_ref: "EU MR 2023/1230 Annex III §1.2.4.3"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU Machinery Regulation 2023/1230"
+      section: "Annex III 1.2.4.3"
+      standard: "Regulation"
+    condition:
+      field: robot.emergency_stop_pressed
+      operator: eq
+      value: true
+    action:
+      type: stop
+      params:
+        reason: "Emergency stop activated (EU MR Annex III §1.2.4.3, ISO 13850)"
+      override: true
+    explanation: "Emergency stop device activated — immediate stop per EU MR Annex III §1.2.4.3."
+    tags: [eu_mr, emergency_stop, iso13850]
+
+  - id: EU-MR-STARTUP-001
+    name: "Unexpected startup prevention"
+    layer: hard
+    standard: "EU Machinery Regulation 2023/1230"
+    section: "Annex III, 1.2.3"
+    audit_ref: "EU MR 2023/1230 Annex III §1.2.3"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU Machinery Regulation 2023/1230"
+      section: "Annex III 1.2.3"
+      standard: "Regulation"
+    condition:
+      and:
+        - field: robot.startup_unexpected
+          operator: eq
+          value: true
+        - field: robot.startup_authorized
+          operator: eq
+          value: false
+    forbidden_actions: [navigate, pick, place, manipulate]
+    explanation: "Unexpected startup prevented — authorization required (EU MR Annex III §1.2.3)."
+    tags: [eu_mr, startup, prevention]
+
+  - id: EU-MR-COMM-FAILURE-001
+    name: "Communication failure — safe state"
+    layer: hard
+    standard: "EU Machinery Regulation 2023/1230"
+    section: "Annex III, 1.2.1"
+    audit_ref: "EU MR 2023/1230 Annex III §1.2.1"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU Machinery Regulation 2023/1230"
+      section: "Annex III 1.2.1"
+      standard: "Regulation"
+    condition:
+      field: robot.communication_failure
+      operator: eq
+      value: true
+    action:
+      type: set_mode
+      params:
+        mode: "SAFE_FALLBACK"
+        reason: "Communication failure — entering safe state (EU MR Annex III §1.2.1)"
+    explanation: "Communication failure must lead to safe state (EU MR Annex III §1.2.1)."
+    tags: [eu_mr, communication, safe_state]
+
+  - id: EU-MR-INSTRUCTIONS-001
+    name: "Digital instructions available"
+    layer: advisory
+    standard: "EU Machinery Regulation 2023/1230"
+    section: "Annex III, 1.7.4"
+    audit_ref: "EU MR 2023/1230 Annex III §1.7.4"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU Machinery Regulation 2023/1230"
+      section: "Annex III 1.7.4"
+      standard: "Regulation"
+    condition:
+      field: robot.digital_instructions_available
+      operator: eq
+      value: false
+    penalty: 3.0
+    explanation: "Instructions should be available in digital format (EU MR Annex III §1.7.4)."
+    tags: [eu_mr, instructions, documentation]
+
+  - id: EU-MR-MARKING-001
+    name: "CE marking requirements"
+    layer: advisory
+    standard: "EU Machinery Regulation 2023/1230"
+    section: "Article 21"
+    audit_ref: "EU MR 2023/1230 Art. 21"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU Machinery Regulation 2023/1230"
+      section: "Article 21"
+      standard: "Regulation"
+    condition:
+      field: robot.ce_marking_ok
+      operator: eq
+      value: false
+    penalty: 5.0
+    explanation: "CE marking requirements not met (EU MR Art. 21)."
+    tags: [eu_mr, ce_marking, compliance]
+

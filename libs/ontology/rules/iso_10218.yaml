@@ -1,0 +1,460 @@
+# ISO-10218-1:2011 Industrial Robot Safety Requirements
+# Source: ISO-10218-1-2011.pdf (via _ontorobotic/raw_sources/formal_safety_regulation/)
+# All requirements are level: mandatory
+#
+# Sections used: 5.2.1, 5.2.2, 5.3.5, 5.4.1, 5.4.2, 5.5.1
+# Also covers ISO-based HRI requirements from "Collaborating robots.pdf"
+
+rules:
+
+  # ── EMERGENCY ──────────────────────────────────────────────────────────
+
+  - id: ISO-SAFETY-CTRL-FAILURE
+    name: "Safety control failure → stop category 0"
+    layer: emergency
+    standard: "ISO"
+    section: "5.4.1"
+    source:
+      document: "ISO-10218-1:2011"
+      section: "5.4.1"
+      standard: "ISO"
+      obligation: mandatory
+    condition:
+      field: robot.safety_control_failure
+      operator: eq
+      value: true
+    action:
+      type: stop
+      params:
+        category: 0
+        reason: "Safety-related control system failure (ISO 10218-1 §5.4.1)"
+      override: true
+    explanation: "ISO 10218-1 §5.4.1: Any safety control system failure → stop category 0 or 1 (IEC 60204-1)"
+    tags: [iso, safety, fault]
+
+  - id: ISO-SINGLE-FAULT-SAFE-STATE
+    name: "Single fault → maintain safe state"
+    layer: emergency
+    standard: "ISO"
+    section: "5.4.2"
+    source:
+      document: "ISO-10218-1:2011"
+      section: "5.4.2"
+      standard: "ISO"
+      obligation: mandatory
+    condition:
+      field: robot.single_fault_detected
+      operator: eq
+      value: true
+    action:
+      type: maintain_safe_state
+      params:
+        reason: "Single fault detected — safe state until corrected (ISO 10218-1 §5.4.2)"
+      override: true
+    explanation: "ISO 10218-1 §5.4.2: Single fault → safety function performed; safe state until fault corrected"
+    tags: [iso, fault, resilience]
+
+  - id: ISO-CONTACT-TORQUE-STOP
+    name: "Stop on joint torque contact threshold"
+    layer: emergency
+    standard: "ISO"
+    section: "5.5"
+    source:
+      document: "6789.pdf (HRI incident, SC-HRI-05)"
+      section: "ISO-10218-1:2011 §5.5"
+      standard: "ISO"
+      obligation: mandatory
+    condition:
+      field: robot.joint_torque_exceeded
+      operator: eq
+      value: true
+    action:
+      type: stop
+      params:
+        reason: "Contact detected via joint torque — restart locked (SC-HRI-05)"
+        restart_lock: true
+      override: true
+    explanation: "Physical contact detected via joint torque threshold → immediate stop + restart lock"
+    tags: [iso, hri, contact, torque]
+
+  # ── HARD CONSTRAINTS ───────────────────────────────────────────────────
+
+  - id: ISO-GUARD-ZONE-STOP
+    name: "Stop before guarded zone with human"
+    layer: hard
+    standard: "ISO"
+    section: "5.2.1"
+    source:
+      document: "ISO-10218-1:2011"
+      section: "5.2.1"
+      standard: "ISO"
+      obligation: mandatory
+    condition:
+      and:
+        - field: zone.guarded
+          operator: eq
+          value: true
+        - field: zone.humans_present
+          operator: eq
+          value: true
+    forbidden_actions: [navigate, pick, place, manipulate]
+    explanation: "ISO 10218-1 §5.2.1: Hazardous functions cease before guarded zone with human can be reached"
+    tags: [iso, guard, human, zone]
+
+  - id: ISO-POWER-RESTORE-STATIC
+    name: "No motion on power restoration"
+    layer: hard
+    standard: "ISO"
+    section: "5.2.2"
+    source:
+      document: "ISO-10218-1:2011"
+      section: "5.2.2"
+      standard: "ISO"
+      obligation: mandatory
+    condition:
+      field: robot.power_just_restored
+      operator: eq
+      value: true
+    forbidden_actions: [navigate, pick, place, rotate, manipulate]
+    explanation: "ISO 10218-1 §5.2.2: Re-initiation of power shall not lead to any motion"
+    tags: [iso, power, startup]
+
+  - id: ISO-LOCAL-CONTROL-INHIBIT
+    name: "Inhibit remote commands in local pendant mode"
+    layer: hard
+    standard: "ISO"
+    section: "5.3.5"
+    source:
+      document: "ISO-10218-1:2011"
+      section: "5.3.5"
+      standard: "ISO"
+      obligation: mandatory
+    condition:
+      field: robot.control_mode
+      operator: eq
+      value: "local_pendant"
+    forbidden_actions: [navigate, pick, place, rotate, manipulate]
+    explanation: "ISO 10218-1 §5.3.5: External/remote motion commands blocked in local pendant control mode"
+    tags: [iso, control, pendant]
+
+  - id: ISO-MIN-SEPARATION
+    name: "Minimum safe separation from humans"
+    layer: hard
+    standard: "ISO"
+    section: "5.5.1"
+    source:
+      document: "ISO-10218-1:2011 §5.5 + Collaborating robots.pdf"
+      section: "5.5.1"
+      standard: "ISO"
+      obligation: mandatory
+    condition:
+      and:
+        - field: zone.humans_present
+          operator: eq
+          value: true
+        - field: robot.clearance_to_human_m
+          operator: lt
+          value: 0.5
+    forbidden_actions: [navigate]
+    explanation: "ISO 10218-1: Minimum 0.5m separation from humans required; stop and wait if violated"
+    tags: [iso, human, separation]
+
+  - id: ISO-HRI-RESTART-INHIBIT
+    name: "No restart while human inside safety radius"
+    layer: hard
+    standard: "ISO-based"
+    section: "SC-HRI-03"
+    source:
+      document: "Collaborating robots.pdf"
+      section: "SC-HRI-03"
+      standard: "ISO-based"
+      obligation: mandatory
+    condition:
+      and:
+        - field: zone.humans_present
+          operator: eq
+          value: true
+        - field: robot.separation_distance
+          operator: lt
+          value: 1.0
+        - field: action.type
+          operator: eq
+          value: "restart"
+    forbidden_actions: [restart, navigate]
+    explanation: "HRI: Restarting motion while human is within 1.0m safety radius is prohibited (SC-HRI-03)"
+    tags: [iso, hri, restart, separation]
+
+  - id: ISO-SAFE-ZONE-BOUNDS
+    name: "No command outside validated safe zone"
+    layer: hard
+    standard: "ISO-based"
+    section: "SC-HRI-06"
+    source:
+      document: "6789.pdf (HRI incident, SC-HRI-06)"
+      section: "SC-HRI-06"
+      standard: "ISO-based"
+    condition:
+      field: action.out_of_safe_zone
+      operator: eq
+      value: true
+    forbidden_actions: [navigate, pick, place, manipulate]
+    explanation: "HRI: Command would take robot outside predefined validated safety zone (SC-HRI-06)"
+    tags: [iso, hri, zone, bounds]
+
+  # ── COLLABORATIVE APPLICATIONS (2025 UPDATE, PARTIAL) ───────────────────
+
+  - id: ISO10218-COLLAB-SPEED-001
+    name: "Collaborative reduced speed"
+    layer: hard
+    standard: "ISO 10218-2:2025"
+    section: "11.6"
+    audit_ref: "ISO 10218-2:2025 §11.6"
+    applicable_robots: ["industrial", "amr", "cobot"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO-10218-2:2025"
+      section: "11.6"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.collaborative_mode
+          operator: eq
+          value: true
+        - field: action.speed_mps
+          operator: gt
+          value: 0.25
+    forbidden_actions: [navigate]
+    explanation: "Collaborative operation speed must be ≤0.25 m/s (250 mm/s) per ISO 10218-2:2025 §11.6."
+    tags: [iso10218, collaborative, speed]
+
+  - id: ISO10218-STANDSTILL-001
+    name: "Monitored standstill with human in collaborative space"
+    layer: hard
+    standard: "ISO 10218-1:2025"
+    section: "5.4"
+    audit_ref: "ISO 10218-1:2025 §5.4"
+    applicable_robots: ["industrial", "cobot"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO-10218-1:2025"
+      section: "5.4"
+      standard: "ISO"
+    condition:
+      and:
+        - field: zone.humans_present
+          operator: eq
+          value: true
+        - field: robot.task_paused
+          operator: eq
+          value: true
+    forbidden_actions: [navigate, restart]
+    explanation: "When human is in collaborative workspace and task is paused, robot must remain in monitored standstill (ISO 10218-1:2025 §5.4)."
+    tags: [iso10218, collaborative, standstill]
+
+  - id: ISO10218-FORCE-001
+    name: "Power and force limiting — contact force threshold"
+    layer: hard
+    standard: "ISO 10218-2:2025"
+    section: "11.6.5"
+    audit_ref: "ISO 10218-2:2025 §11.6.5"
+    applicable_robots: ["industrial", "cobot"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO-10218-2:2025"
+      section: "11.6.5"
+      standard: "ISO"
+    condition:
+      field: robot.contact_force_n
+      operator: gt
+      value:  "robot.max_force_for_body_region"
+    forbidden_actions: [navigate, manipulate]
+    explanation: "Contact force exceeds body-region limit; robot must stop per ISO 10218-2:2025 §11.6.5."
+    tags: [iso10218, force, collaborative]
+
+  - id: ISO10218-PFL-HEAD-001
+    name: "Power/force limit — head contact"
+    layer: hard
+    standard: "ISO 10218-2:2025"
+    section: "11.6.5"
+    audit_ref: "ISO 10218-2:2025 §11.6.5"
+    applicable_robots: ["industrial", "cobot", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO-10218-2:2025"
+      section: "11.6.5"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.contact_body_region
+          operator: eq
+          value: "head"
+        - field: robot.contact_force_n
+          operator: gt
+          value: 130
+    forbidden_actions: [navigate, manipulate]
+    explanation: "Head contact force exceeds 130N transient / 65N quasi-static limit (ISO 10218-2:2025 §11.6.5)."
+    tags: [iso10218, force, head, pfl]
+
+  - id: ISO10218-PFL-CHEST-001
+    name: "Power/force limit — chest contact"
+    layer: hard
+    standard: "ISO 10218-2:2025"
+    section: "11.6.5"
+    audit_ref: "ISO 10218-2:2025 §11.6.5"
+    applicable_robots: ["industrial", "cobot", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO-10218-2:2025"
+      section: "11.6.5"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.contact_body_region
+          operator: eq
+          value: "chest"
+        - field: robot.contact_force_n
+          operator: gt
+          value: 150
+    forbidden_actions: [navigate, manipulate]
+    explanation: "Chest contact force exceeds 150N transient / 140N quasi-static limit (ISO 10218-2:2025 §11.6.5)."
+    tags: [iso10218, force, chest, pfl]
+
+  - id: ISO10218-PFL-HAND-001
+    name: "Power/force limit — hand/arm contact"
+    layer: hard
+    standard: "ISO 10218-2:2025"
+    section: "11.6.5"
+    audit_ref: "ISO 10218-2:2025 §11.6.5"
+    applicable_robots: ["industrial", "cobot", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO-10218-2:2025"
+      section: "11.6.5"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.contact_body_region
+          operator: eq
+          value: "hand"
+        - field: robot.contact_force_n
+          operator: gt
+          value: 235
+    forbidden_actions: [navigate, manipulate]
+    explanation: "Hand/arm contact force exceeds 235N transient / 140N quasi-static limit (ISO 10218-2:2025 §11.6.5)."
+    tags: [iso10218, force, hand, pfl]
+
+  - id: ISO10218-SSM-001
+    name: "Speed and Separation Monitoring — protective distance violated"
+    layer: hard
+    standard: "ISO 10218-2:2025"
+    section: "11.6.4"
+    audit_ref: "ISO 10218-2:2025 §11.6.4"
+    applicable_robots: ["industrial", "cobot", "amr"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO-10218-2:2025"
+      section: "11.6.4"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.ssm_mode
+          operator: eq
+          value: true
+        - field: robot.protective_distance_violated
+          operator: eq
+          value: true
+    forbidden_actions: [navigate, manipulate]
+    explanation: "SSM protective distance violated — robot must stop (ISO 10218-2:2025 §11.6.4)."
+    tags: [iso10218, ssm, separation, stop]
+
+  - id: ISO10218-SSM-SPEED-001
+    name: "SSM mode — speed proportional to separation"
+    layer: hard
+    standard: "ISO 10218-2:2025"
+    section: "11.6.4"
+    audit_ref: "ISO 10218-2:2025 §11.6.4"
+    applicable_robots: ["industrial", "cobot", "amr"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO-10218-2:2025"
+      section: "11.6.4"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.ssm_mode
+          operator: eq
+          value: true
+        - field: action.speed_mps
+          operator: gt
+          value: "robot.ssm_max_speed_for_distance"
+    forbidden_actions: [navigate]
+    explanation: "In SSM mode, robot speed must be ≤ f(separation_distance); exceeds limit (ISO 10218-2:2025 §11.6.4)."
+    tags: [iso10218, ssm, speed, separation]
+
+  - id: ISO10218-CYBER-001
+    name: "Cybersecurity measures for safety control systems"
+    layer: policy
+    standard: "ISO 10218-1:2025"
+    section: "5.6"
+    audit_ref: "ISO 10218-1:2025 §5.6"
+    applicable_robots: ["industrial", "cobot", "amr"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO-10218-1:2025"
+      section: "5.6"
+      standard: "ISO"
+    condition:
+      field: robot.cybersecurity_measures_ok
+      operator: eq
+      value: false
+    penalty: 30.0
+    explanation: "Cybersecurity measures for safety-related control systems not implemented (ISO 10218-1:2025 §5.6)."
+    tags: [iso10218, cybersecurity, policy]
+
+  - id: ISO10218-WORKSPACE-001
+    name: "Collaborative workspace boundaries defined"
+    layer: policy
+    standard: "ISO 10218-2:2025"
+    section: "11.6.2"
+    audit_ref: "ISO 10218-2:2025 §11.6.2"
+    applicable_robots: ["industrial", "cobot", "amr"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO-10218-2:2025"
+      section: "11.6.2"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.collaborative_mode
+          operator: eq
+          value: true
+        - field: zone.collaborative_boundaries_defined
+          operator: eq
+          value: false
+    penalty: 25.0
+    explanation: "Collaborative workspace must have clearly defined boundaries (ISO 10218-2:2025 §11.6.2)."
+    tags: [iso10218, collaborative, workspace, boundaries]
+
+  - id: ISO10218-SAFEGUARD-RESET-001
+    name: "Manual reset required after protective stop"
+    layer: hard
+    standard: "ISO 10218-1:2025"
+    section: "5.4"
+    audit_ref: "ISO 10218-1:2025 §5.4"
+    applicable_robots: ["industrial", "cobot"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO-10218-1:2025"
+      section: "5.4"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.protective_stop_active
+          operator: eq
+          value: true
+        - field: robot.manual_reset_done
+          operator: eq
+          value: false
+    forbidden_actions: [navigate, restart, manipulate]
+    explanation: "After protective stop, manual reset is required before resuming motion (ISO 10218-1:2025 §5.4)."
+    tags: [iso10218, safeguard, reset, protective_stop]

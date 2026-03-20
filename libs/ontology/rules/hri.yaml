@@ -1,0 +1,142 @@
+# Human-Robot Interaction Safety Rules
+# Sources: HRI research papers + incident reports
+#   - "Robot doesn't avoid for moving person #8.pdf"  (SC-HRI-01)
+#   - "Collaborating robots.pdf"                       (SC-HRI-02..04)
+#   - "6789.pdf"                                       (SC-HRI-05..06)
+#
+# These rules complement ISO-10218 with scenario-specific constraints
+# derived from documented real and simulated incidents.
+
+rules:
+
+  # ── EMERGENCY ──────────────────────────────────────────────────────────
+
+  - id: HRI-PERCEPTION-MISMATCH-STOP
+    name: "Stop on perception error with human present"
+    layer: emergency
+    audit_ref: "ISO 10218-1:2011 §5.4.2"
+    source:
+      document: "Robot doesn't avoid for moving person #8.pdf"
+      section: "SC-HRI-01"
+      standard: "HRI-incident"
+    condition:
+      and:
+        - field: zone.humans_present
+          operator: eq
+          value: true
+        - field: robot.perception_error
+          operator: eq
+          value: true
+    action:
+      type: stop
+      params:
+        reason: "Perception mismatch with human present — failsafe stop (SC-HRI-01)"
+      override: true
+    explanation: "Incident #8: Human in path + perception/tracking error → robot failed to avoid; must stop immediately"
+    tags: [hri, perception, incident, emergency]
+
+  - id: HRI-DYNAMIC-SAFETY-STOP
+    name: "Protective stop on dynamic safety distance violation"
+    layer: emergency
+    audit_ref: "ISO 10218-2:2011 §5.10.3"
+    source:
+      document: "Collaborating robots.pdf"
+      section: "SC-HRI-04"
+      standard: "HRI"
+    condition:
+      and:
+        - field: zone.humans_present
+          operator: eq
+          value: true
+        - field: robot.dynamic_clearance_ok
+          operator: eq
+          value: false
+    action:
+      type: protective_stop
+      params:
+        reason: "Dynamic safety distance violated — human acceleration exceeded buffer (SC-HRI-04)"
+      override: true
+    explanation: "Human accelerating toward robot makes static buffer insufficient → dynamic braking (SC-HRI-04)"
+    tags: [hri, dynamic, distance, emergency]
+
+  # ── HARD CONSTRAINTS ───────────────────────────────────────────────────
+
+  - id: HRI-SHARED-OBJECT-WAIT
+    name: "Wait when human accesses same object"
+    layer: hard
+    audit_ref: "ISO 10218-2:2011 §5.10.5"
+    source:
+      document: "Collaborating robots.pdf"
+      section: "SC-HRI-02"
+      standard: "HRI"
+    condition:
+      and:
+        - field: zone.humans_present
+          operator: eq
+          value: true
+        - field: action.target_object_human_accessing
+          operator: eq
+          value: true
+    forbidden_actions: [pick, place, manipulate]
+    explanation: "HRI: Shared object contention — robot and human accessing same workpiece; robot yields (SC-HRI-02)"
+    tags: [hri, shared, contention, wait]
+
+  - id: HRI-NO-APPROACH-HUMAN-ZONE
+    name: "No navigation into human-occupied restricted zone"
+    layer: hard
+    audit_ref: "OSHA 1910.178(l)(1) + ISO 10218-1:2011 §5.6"
+    source:
+      document: "OSHA_Warehouse.pdf + ISO-10218-1:2011"
+      section: "R-01 + SC-HRI"
+      standard: "OSHA+ISO+HRI"
+    condition:
+      and:
+        - field: target_zone.zone_type
+          operator: eq
+          value: "restricted"
+        - field: target_zone.humans_present
+          operator: eq
+          value: true
+    forbidden_actions: [navigate]
+    explanation: "Forbidden to enter restricted zone when human is present (R-01 from _ontorobotic)"
+    tags: [hri, zone, restricted, human]
+
+  # ── POLICY ─────────────────────────────────────────────────────────────
+
+  - id: HRI-PREFER-ASK-HUMAN
+    name: "Prefer asking human to clear zone"
+    layer: policy
+    audit_ref: "ISO 10218-2:2011 §5.12 (cooperative workspace)"
+    source:
+      document: "Operational SOP (P-03)"
+      section: "HRI best practice"
+      standard: "Operational"
+    condition:
+      field: zone.humans_present
+      operator: eq
+      value: true
+    penalty: 15
+    explanation: "Human present in zone: consider AskHumanClearZone action before navigating through"
+    tags: [hri, policy, human, clearance]
+
+  - id: HRI-URGENT-BATTERY-ASK
+    name: "Low battery + urgent task → prefer human handoff"
+    layer: policy
+    audit_ref: "IEC 62133:2012 §7.3.7 (battery safety + operational continuity)"
+    source:
+      document: "Operational SOP (P-HRI-URGENCY-ASSIST)"
+      standard: "Operational"
+    condition:
+      and:
+        - field: robot.task_urgency
+          operator: eq
+          value: "high"
+        - field: robot.battery_level
+          operator: lt
+          value: 15
+        - field: zone.humans_present
+          operator: eq
+          value: true
+    penalty: 20
+    explanation: "Urgent task + low battery + human present: prefer AskHuman for fast load handoff over docking"
+    tags: [hri, policy, urgency, battery]

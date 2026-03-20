@@ -1,0 +1,149 @@
+---
+# EU AI Act 2024/1689 — High-Risk AI System Requirements (ADVISORY rules)
+# NOTE: These rules are advisory and aimed at documentation, oversight, and logging.
+
+rules:
+
+  - id: EU-AIACT-RM-001
+    name: "Risk management process documented"
+    layer: advisory
+    standard: "EU AI Act 2024/1689"
+    section: "Article 9"
+    audit_ref: "EU AI Act 2024/1689 Art. 9"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU AI Act 2024/1689"
+      section: "Article 9"
+      standard: "Regulation"
+    description: "High-risk AI systems must have a documented, ongoing risk management system."
+    condition:
+      field: ai.risk_management_documented
+      operator: eq
+      value: false
+    penalty: 5.0
+    explanation: "EU AI Act: Missing documented risk management system for AI component (Art. 9)."
+    tags: [eu_ai_act, risk_management]
+
+  - id: EU-AIACT-LOG-001
+    name: "AI decision logging enabled"
+    layer: advisory
+    standard: "EU AI Act 2024/1689"
+    section: "Article 12"
+    audit_ref: "EU AI Act 2024/1689 Art. 12"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU AI Act 2024/1689"
+      section: "Article 12"
+      standard: "Regulation"
+    description: "High-risk AI systems shall be designed with logging capabilities."
+    condition:
+      field: ai.logging_enabled
+      operator: eq
+      value: false
+    penalty: 5.0
+    explanation: "EU AI Act: AI safety decisions are not logged (Art. 12)."
+    tags: [eu_ai_act, logging]
+
+  - id: EU-AIACT-HUMAN-OVERSIGHT-001
+    name: "Human oversight configured"
+    layer: advisory
+    standard: "EU AI Act 2024/1689"
+    section: "Article 14"
+    audit_ref: "EU AI Act 2024/1689 Art. 14"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU AI Act 2024/1689"
+      section: "Article 14"
+      standard: "Regulation"
+    description: "Human oversight must enable understanding, monitoring, and override of AI system."
+    condition:
+      field: ai.human_oversight_configured
+      operator: eq
+      value: false
+    penalty: 10.0
+    explanation: "EU AI Act: No configured human oversight for AI component (Art. 14)."
+    tags: [eu_ai_act, oversight]
+
+  - id: EUAI-RISK-MGMT-001
+    name: "Documented risk management system for high-risk AI"
+    layer: policy
+    standard: "EU AI Act 2024/1689"
+    section: "Article 9"
+    audit_ref: "EU AI Act 2024/1689 Art. 9"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU AI Act 2024/1689"
+      section: "Article 9"
+      standard: "Regulation"
+    condition:
+      field: ai.risk_management_system_documented
+      operator: eq
+      value: false
+    penalty: 20.0
+    explanation: "High-risk AI system requires documented risk management system (EU AI Act Art. 9)."
+    tags: [eu_ai_act, risk_management, policy]
+
+  - id: EUAI-DATA-GOV-001
+    name: "Training data governance"
+    layer: advisory
+    standard: "EU AI Act 2024/1689"
+    section: "Article 10"
+    audit_ref: "EU AI Act 2024/1689 Art. 10"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU AI Act 2024/1689"
+      section: "Article 10"
+      standard: "Regulation"
+    condition:
+      field: ai.data_governance_documented
+      operator: eq
+      value: false
+    penalty: 8.0
+    explanation: "Training data governance not documented (EU AI Act Art. 10)."
+    tags: [eu_ai_act, data_governance]
+
+  - id: EUAI-TRANSPARENCY-001
+    name: "AI system transparency for deployers"
+    layer: advisory
+    standard: "EU AI Act 2024/1689"
+    section: "Article 13"
+    audit_ref: "EU AI Act 2024/1689 Art. 13"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU AI Act 2024/1689"
+      section: "Article 13"
+      standard: "Regulation"
+    condition:
+      field: ai.transparency_info_available
+      operator: eq
+      value: false
+    penalty: 5.0
+    explanation: "Deployers not informed about AI system capabilities and limitations (EU AI Act Art. 13)."
+    tags: [eu_ai_act, transparency]
+
+  - id: EUAI-ACCURACY-001
+    name: "AI accuracy, robustness, and cybersecurity"
+    layer: policy
+    standard: "EU AI Act 2024/1689"
+    section: "Article 15"
+    audit_ref: "EU AI Act 2024/1689 Art. 15"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["EU"]
+    source:
+      document: "EU AI Act 2024/1689"
+      section: "Article 15"
+      standard: "Regulation"
+    condition:
+      field: ai.accuracy_robustness_validated
+      operator: eq
+      value: false
+    penalty: 15.0
+    explanation: "AI system accuracy, robustness, and cybersecurity not validated (EU AI Act Art. 15)."
+    tags: [eu_ai_act, accuracy, robustness, cybersecurity]
+
