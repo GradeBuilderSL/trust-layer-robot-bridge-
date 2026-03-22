@@ -49,6 +49,9 @@ from bridge.local_brain import LocalBrain
 from bridge.connectivity_monitor import ConnectivityMonitor
 from bridge.event_buffer import EventBuffer
 from bridge.watchdog import EdgeWatchdog
+from bridge.local_behavior import LocalBehaviorManager
+from bridge.local_navigator import LocalNavigator
+from bridge.local_cache import LocalKnowledgeCache
 
 
 # ── Configuration ────────────────────────────────────────────────────────
@@ -118,6 +121,9 @@ _license_mgr = LicenseManager(data_dir=DATA_DIR, robot_api_url=None)
 _brain = LocalBrain(data_dir=DATA_DIR)
 _event_buf = EventBuffer(db_path=f"{DATA_DIR}/event_buffer.db")
 _connectivity: ConnectivityMonitor | None = None
+_cache = LocalKnowledgeCache(cache_dir=f"{DATA_DIR}/cache")
+_local_behavior: LocalBehaviorManager | None = None
+_local_navigator: LocalNavigator | None = None
 
 _state_lock = threading.Lock()
 _latest_state: dict = {}
@@ -137,11 +143,15 @@ _CHAT_HISTORY_MAX = 100
 def _on_watchdog_fallback():
     """Called when watchdog fires: stop robot immediately."""
     logger.warning("SAFE_FALLBACK: watchdog timeout — stopping robot")
-    try:
-        if _adapter:
-            _adapter.stop()
-    except Exception as exc:
-        logger.error("SAFE_FALLBACK stop failed: %s", exc)
+    if _local_behavior:
+        _local_behavior.on_disconnect()
+    else:
+        # Fallback to original stop behavior
+        try:
+            if _adapter:
+                _adapter.stop()
+        except Exception as exc:
+            logger.error("SAFE_FALLBACK stop failed: %s", exc)
     # Push SAFE_FALLBACK event to decision_log
     class _FallbackGate:
         decision = "DENY"
@@ -154,6 +164,10 @@ def _on_watchdog_fallback():
 
 def _on_watchdog_recover():
     logger.info("watchdog: upstream heartbeat restored")
+    if _local_behavior:
+        _local_behavior.on_reconnect()
+    # Sync cache immediately on reconnect
+    _cache.sync_now()
 
 
 _watchdog = EdgeWatchdog(
@@ -206,6 +220,7 @@ def _on_mode_change(new_mode: str):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _adapter, _poller_thread, _running, _connectivity
+    global _local_behavior, _local_navigator
 
     # 1. Verify license (offline, non-blocking)
     status = _license_mgr.verify()
@@ -221,6 +236,23 @@ async def lifespan(app: FastAPI):
     _running = True
     _poller_thread = threading.Thread(target=_poller, daemon=True)
     _poller_thread.start()
+
+    # 3b. Initialize local behavior manager and navigator
+    _local_behavior = LocalBehaviorManager(
+        adapter=_adapter, brain=_brain, event_buffer=_event_buf
+    )
+    _local_navigator = LocalNavigator(
+        adapter=_adapter, safety_gate=_brain._pipeline,
+        event_buffer=_event_buf
+    )
+    _local_behavior.set_navigator(_local_navigator)
+
+    # 3c. Configure cache and start sync
+    _cache.configure(
+        knowledge_url=os.getenv("KNOWLEDGE_SERVICE_URL", ""),
+        nlgw_url=os.getenv("WORKSTATION_URL", ""),
+    )
+    _cache.start_sync()
 
     # 4. Start connectivity monitor
     _connectivity = ConnectivityMonitor(
@@ -243,6 +275,7 @@ async def lifespan(app: FastAPI):
     yield
 
     _running = False
+    _cache.stop_sync()
     if _connectivity:
         _connectivity.stop()
     if _poller_thread:
@@ -399,7 +432,35 @@ def robot_stop():
 def robot_heartbeat():
     """Explicit heartbeat from upstream — resets watchdog timer."""
     _watchdog.heartbeat()
-    return {"ok": True, "in_fallback": _watchdog.in_fallback}
+    with _state_lock:
+        state = dict(_latest_state)
+    return {
+        "ok": True,
+        "in_fallback": _watchdog.in_fallback,
+        "battery": state.get("battery", None),
+        "position": state.get("position", None),
+        "cache_age_s": round(_cache.last_sync_age, 1),
+        "local_safety_active": (
+            _local_behavior.is_disconnected
+            if _local_behavior else False
+        ),
+    }
+
+
+@app.get("/robot/local_behavior")
+def get_local_behavior():
+    """Local behavior manager, cache, and navigator status."""
+    return {
+        "behavior": (
+            _local_behavior.status()
+            if _local_behavior else {}
+        ),
+        "cache": _cache.stats(),
+        "navigator": {
+            "active": _local_navigator is not None
+        },
+        "brain": _brain.status_dict() if _brain else {},
+    }
 
 
 @app.get("/watchdog/status")
