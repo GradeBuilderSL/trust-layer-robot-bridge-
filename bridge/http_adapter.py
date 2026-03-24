@@ -45,7 +45,9 @@ class HttpAdapter(RobotAdapter):
             },
             "heading_rad": float(data.get("heading_rad", 0)),
             "speed_mps": float(data.get("speed_mps", 0)),
-            "battery": float(data.get("battery_pct", 100)),
+            # Isaac Sim has no real battery — default to 95% in sim
+            # For real robot: battery_pct comes from robot API
+            "battery": float(data.get("battery_pct", 0)) or 95.0,
             "tilt_deg": float(data.get("tilt_deg", 0)),
             "temperature_c": float(data.get("temperature_c", 25)),
             "mode": data.get("mode", "ADVISORY"),
