@@ -600,8 +600,12 @@ def robot_action(req: ActionRequest):
             }
 
         nav_result = _adapter.navigate_to(x_m, y_m, speed_mps=speed)
+        # Fallback: if adapter doesn't support navigate_to, use LocalNavigator
+        if nav_result.get("status") == "not_supported" and _local_navigator:
+            logger.info("Adapter doesn't support navigate_to, using LocalNavigator")
+            nav_result = _local_navigator.navigate_to(x_m, y_m, speed_mps=speed)
         return {
-            "status": "ok",
+            "status": "ok" if nav_result.get("status") != "not_supported" else "fallback",
             "action_id": req.action_id,
             "action_type": atype,
             "result": nav_result,
