@@ -65,6 +65,39 @@ class HttpAdapter(RobotAdapter):
             return {"status": "error", "error": self._last_error}
         return {"status": "ok", "adapter": "http"}
 
+    def navigate_to(
+        self, x_m: float, y_m: float,
+        heading_rad: float = 0.0, speed_mps: float = 0.3,
+    ) -> dict:
+        """Navigate to position via Isaac Sim / robot HTTP API.
+
+        Tries POST /api/cmd/navigate first (if robot supports it).
+        Fallback: compute velocity toward target and send via /api/cmd/velocity.
+        """
+        # Try direct navigate endpoint (Isaac Sim h1_bridge supports this)
+        result = self._post(
+            "/api/cmd/navigate",
+            {"x": x_m, "y": y_m, "heading": heading_rad, "speed": speed_mps},
+        )
+        if result is not None:
+            return {"status": "ok", "adapter": "http", "target": {"x": x_m, "y": y_m}, "speed_mps": speed_mps}
+
+        # Fallback: compute direction and send velocity
+        import math
+        state = self.get_telemetry()
+        pos = state.get("position", {})
+        rx, ry = float(pos.get("x", 0)), float(pos.get("y", 0))
+        dx, dy = x_m - rx, y_m - ry
+        dist = math.hypot(dx, dy)
+        if dist < 0.1:
+            return {"status": "ok", "adapter": "http", "note": "already_at_target"}
+        # Normalize and scale by speed
+        vx = (dx / dist) * min(speed_mps, 0.8)
+        vy = (dy / dist) * min(speed_mps, 0.8)
+        self.send_velocity(vx, vy, 0.0)
+        return {"status": "moving_to_destination", "adapter": "http",
+                "target": {"x": x_m, "y": y_m}, "speed_mps": speed_mps}
+
     def stop(self) -> dict:
         """Emergency stop via POST /api/cmd/stop."""
         result = self._post("/api/cmd/stop", {})
