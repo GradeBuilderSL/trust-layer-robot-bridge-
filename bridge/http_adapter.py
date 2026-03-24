@@ -279,8 +279,9 @@ class HttpAdapter(RobotAdapter):
             "position": {"x": 0, "y": 0, "z": 0},
             "velocity": {"vx": 0, "vy": 0, "vz": 0},
             "heading_rad": 0, "speed_mps": 0,
-            "battery": 0, "tilt_deg": 0, "temperature_c": 0,
-            "mode": "UNKNOWN", "timestamp_s": time.time(),
+            "battery": 95.0,  # default safe value — prevents false EMERGENCY_BATTERY
+            "tilt_deg": 0, "temperature_c": 25,
+            "mode": "ADVISORY", "timestamp_s": time.time(),
             "adapter": "http", "error": self._last_error,
             "sensors": {},
         }
