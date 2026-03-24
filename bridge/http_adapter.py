@@ -4,9 +4,12 @@ Connects to the real robot's HTTP API at http://<robot-ip>:8000/api/...
 Falls back gracefully to error state if robot is unreachable.
 """
 import json
+import logging
 import time
 import urllib.request
 import urllib.error
+
+logger = logging.getLogger(__name__)
 
 from bridge.adapter_base import RobotAdapter
 
@@ -56,33 +59,53 @@ class HttpAdapter(RobotAdapter):
         }
 
     def send_velocity(self, vx: float, vy: float, wz: float) -> dict:
-        """Send velocity via POST /api/cmd/velocity."""
+        """Send velocity command. Tries /api/cmd/velocity, fallback to /chat/send."""
+        # Try direct velocity endpoint (Noetix N2 API)
         result = self._post(
             f"/api/cmd/velocity?vx={vx:.3f}&vy={vy:.3f}&wz={wz:.3f}",
             {},
         )
-        if result is None:
-            return {"status": "error", "error": self._last_error}
-        return {"status": "ok", "adapter": "http"}
+        if result is not None:
+            return {"status": "ok", "adapter": "http"}
+
+        # Fallback: Isaac Sim h1_bridge uses /chat/send for commands
+        import math
+        speed = math.hypot(vx, vy)
+        if speed < 0.01 and abs(wz) < 0.01:
+            chat_cmd = "stop"
+        elif abs(wz) > 0.1:
+            chat_cmd = f"turn {'left' if wz > 0 else 'right'}"
+        else:
+            chat_cmd = f"walk forward {speed:.1f}"
+
+        logger.info("http_adapter: /api/cmd/velocity failed, using /chat/send: %s", chat_cmd)
+        result = self._post("/chat/send", {"message": chat_cmd})
+        if result is not None:
+            return {"status": "ok", "adapter": "http_chat", "chat_cmd": chat_cmd}
+        return {"status": "error", "error": self._last_error}
 
     def navigate_to(
         self, x_m: float, y_m: float,
         heading_rad: float = 0.0, speed_mps: float = 0.3,
     ) -> dict:
-        """Navigate to position via Isaac Sim / robot HTTP API.
-
-        Tries POST /api/cmd/navigate first (if robot supports it).
-        Fallback: compute velocity toward target and send via /api/cmd/velocity.
-        """
-        # Try direct navigate endpoint (Isaac Sim h1_bridge supports this)
+        """Navigate to position. Tries API endpoints, fallback to chat commands."""
+        # Try 1: direct navigate endpoint
         result = self._post(
             "/api/cmd/navigate",
             {"x": x_m, "y": y_m, "heading": heading_rad, "speed": speed_mps},
         )
         if result is not None:
-            return {"status": "ok", "adapter": "http", "target": {"x": x_m, "y": y_m}, "speed_mps": speed_mps}
+            return {"status": "ok", "adapter": "http", "target": {"x": x_m, "y": y_m}}
 
-        # Fallback: compute direction and send velocity
+        # Try 2: Isaac Sim chat command (h1_bridge parses "walk to X Y")
+        chat_cmd = f"find_and_approach {x_m:.1f} {y_m:.1f}"
+        result = self._post("/chat/send", {"message": chat_cmd})
+        if result is not None:
+            logger.info("http_adapter: navigate via /chat/send: %s", chat_cmd)
+            return {"status": "moving_to_destination", "adapter": "http_chat",
+                    "target": {"x": x_m, "y": y_m}, "chat_cmd": chat_cmd}
+
+        # Try 3: compute velocity toward target
         import math
         state = self.get_telemetry()
         pos = state.get("position", {})
@@ -91,12 +114,11 @@ class HttpAdapter(RobotAdapter):
         dist = math.hypot(dx, dy)
         if dist < 0.1:
             return {"status": "ok", "adapter": "http", "note": "already_at_target"}
-        # Normalize and scale by speed
         vx = (dx / dist) * min(speed_mps, 0.8)
         vy = (dy / dist) * min(speed_mps, 0.8)
         self.send_velocity(vx, vy, 0.0)
         return {"status": "moving_to_destination", "adapter": "http",
-                "target": {"x": x_m, "y": y_m}, "speed_mps": speed_mps}
+                "target": {"x": x_m, "y": y_m}}
 
     def stop(self) -> dict:
         """Emergency stop via POST /api/cmd/stop."""
