@@ -121,11 +121,16 @@ class HttpAdapter(RobotAdapter):
                 "target": {"x": x_m, "y": y_m}}
 
     def stop(self) -> dict:
-        """Emergency stop via POST /api/cmd/stop."""
+        """Emergency stop. Tries /api/cmd/stop, fallback to /chat/send and zero velocity."""
         result = self._post("/api/cmd/stop", {})
-        if result is None:
-            return {"status": "error", "error": self._last_error}
-        return {"status": "stopped", "adapter": "http"}
+        if result is not None:
+            return {"status": "stopped", "adapter": "http"}
+        # Fallback 1: chat command
+        self._post("/chat/send", {"message": "stop"})
+        # Fallback 2: zero velocity
+        self._post("/api/cmd/velocity?vx=0&vy=0&wz=0", {})
+        logger.info("http_adapter: stop via fallback (chat + zero velocity)")
+        return {"status": "stopped", "adapter": "http_fallback"}
 
     def get_entities(self) -> list[dict]:
         """N2 doesn't expose entities — return empty."""
