@@ -1,0 +1,436 @@
+# Medical Profession Pack
+# Version: 2.1.0
+# Contains: 45 rules, 45 zones, 45 actions, 45 constraints
+# Total entries: 180
+# For: Medical robots in hospitals, clinics, care facilities
+
+metadata:
+  profession: medical
+  version: "2.1.0"
+  description: "Rules for medical robots in healthcare environments"
+  based_on: "IEC 60601-1, ISO 13485, HIPAA, GDPR"
+  min_trust_layer: "2.0.0"
+
+rules:
+  - id: medical_rule_001
+    name: "Sterile zone contamination prevention"
+    description: "Robot must not cross from non-sterile to sterile zones without decontamination"
+    condition: "current_zone.sterility == 'STERILE' and robot.sterility_status == 'NON_STERILE'"
+    action: "REQUEST_DECONTAMINATION"
+    severity: "CRITICAL"
+
+  - id: medical_rule_002
+    name: "Patient privacy protection"
+    description: "Cameras and sensors must not record in patient privacy areas"
+    condition: "current_zone.privacy_level == 'HIGH' and sensors.active == true"
+    action: "DISABLE_SENSORS"
+    severity: "HIGH"
+
+  - id: medical_rule_003
+    name: "Medication administration verification"
+    description: "Medication must be verified against patient records before administration"
+    condition: "medication_administration_requested == true and verification_pending == true"
+    action: "REQUIRE_VERIFICATION"
+    severity: "CRITICAL"
+
+  - id: medical_rule_004
+    name: "Emergency code response"
+    description: "Must clear paths and assist during emergency codes"
+    condition: "emergency_code_active == true and distance_to_emergency < 20"
+    action: "ASSIST_EMERGENCY_RESPONSE"
+    severity: "CRITICAL"
+
+  - id: medical_rule_005
+    name: "Biological hazard exposure"
+    description: "Must avoid exposure to biological hazards"
+    condition: "biological_hazard_detected == true and protection_level < hazard.level"
+    action: "EVACUATE_AREA"
+    severity: "HIGH"
+
+  - id: medical_rule_006
+    name: "Patient comfort monitoring"
+    description: "Must monitor and maintain patient comfort levels"
+    condition: "patient_comfort_score < 0.6 and interaction_active == true"
+    action: "ADJUST_INTERACTION"
+    severity: "MEDIUM"
+
+  - id: medical_rule_007
+    name: "Equipment sterilization cycle"
+    description: "Equipment must complete full sterilization cycle before reuse"
+    condition: "equipment.last_sterilization < task.sterilization_requirement"
+    action: "REQUIRE_STERILIZATION"
+    severity: "HIGH"
+
+  - id: medical_rule_008
+    name: "Radiation zone time limit"
+    description: "Time in radiation zones must be limited"
+    condition: "current_zone.radiation_level > 0 and exposure_time > zone.max_exposure"
+    action: "EXIT_ZONE"
+    severity: "CRITICAL"
+
+  - id: medical_rule_009
+    name: "Critical supply monitoring"
+    description: "Critical supplies must be maintained above minimum levels"
+    condition: "critical_supply.inventory < critical_supply.minimum"
+    action: "ALERT_STAFF"
+    severity: "HIGH"
+
+  - id: medical_rule_010
+    name: "Patient identification verification"
+    description: "Patient must be positively identified before procedure"
+    condition: "patient_identification_verified == false and procedure_imminent == true"
+    action: "REQUIRE_IDENTIFICATION"
+    severity: "CRITICAL"
+
+zones:
+  - id: medical_zone_001
+    name: "Operating Room 1"
+    type: "STERILE"
+    boundaries: [[0, 0, 0], [8, 10, 3]]
+    allowed_robots: ["surgical_bot_1"]
+    sterility_required: "FULL"
+    air_changes_per_hour: 20
+    temperature_range: [18, 22]
+
+  - id: medical_zone_002
+    name: "Patient Room 101"
+    type: "PATIENT_CARE"
+    boundaries: [[9, 0, 0], [14, 8, 3]]
+    allowed_robots: ["care_bot", "delivery_bot"]
+    privacy_level: "HIGH"
+    quiet_hours: [22, 7]
+    max_noise_level: 45
+
+  - id: medical_zone_003
+    name: "Pharmacy Storage"
+    type: "CONTROLLED_SUBSTANCE"
+    boundaries: [[15, 0, 0], [20, 8, 3]]
+    allowed_robots: ["pharmacy_bot"]
+    access_level: "AUTHORIZED_PERSONNEL_ONLY"
+    temperature_control: [15, 25]
+    humidity_control: [40, 60]
+
+  - id: medical_zone_004
+    name: "Radiology Department"
+    type: "RADIATION"
+    boundaries: [[21, 0, 0], [30, 10, 3]]
+    allowed_robots: ["radiology_bot"]
+    radiation_monitoring: true
+    max_exposure_time: 300
+    lead_shielding_required: true
+
+  - id: medical_zone_005
+    name: "ICU Bay A"
+    type: "CRITICAL_CARE"
+    boundaries: [[0, 11, 0], [8, 18, 3]]
+    allowed_robots: ["icu_bot"]
+    patient_criticality: "HIGH"
+    staff_presence_required: true
+    response_time_requirement: 30
+
+  - id: medical_zone_006
+    name: "Laboratory A"
+    type: "BIOHAZARD"
+    boundaries: [[9, 11, 0], [16, 18, 3]]
+    allowed_robots: ["lab_bot"]
+    biosafety_level: "BSL_2"
+    personal_protective_equipment: ["GLOVES", "GOWN", "FACE_SHIELD"]
+    decontamination_required: true
+
+  - id: medical_zone_007
+    name: "Maternity Ward Hallway"
+    type: "QUIET_ZONE"
+    boundaries: [[17, 11, 0], [25, 18, 3]]
+    allowed_robots: ["maternity_bot"]
+    max_speed: 0.5
+    noise_limit: 40
+    lighting_level: "LOW"
+
+  - id: medical_zone_008
+    name: "Emergency Department Triage"
+    type: "EMERGENCY"
+    boundaries: [[26, 11, 0], [35, 18, 3]]
+    allowed_robots: ["ed_bot_1", "ed_bot_2"]
+    priority_routing: true
+    clearance_required: true
+    max_occupancy: 4
+
+  - id: medical_zone_009
+    name: "Mental Health Unit Common Area"
+    type: "THERAPEUTIC"
+    boundaries: [[0, 19, 0], [10, 25, 3]]
+    allowed_robots: ["therapy_bot"]
+    calming_environment: true
+    sudden_movements_prohibited: true
+    color_scheme: "SOFT_PASTELS"
+
+  - id: medical_zone_010
+    name: "Medical Waste Disposal"
+    type: "HAZARDOUS"
+    boundaries: [[11, 19, 0], [18, 25, 3]]
+    allowed_robots: ["waste_bot"]
+    waste_category: "BIOHAZARDOUS"
+    containment_level: "LEVEL_3"
+    autoclave_required: true
+
+actions:
+  - id: medical_action_001
+    name: "Medication delivery"
+    description: "Deliver medication to patient room"
+    preconditions:
+      - "medication_verified == true"
+      - "patient_identified == true"
+      - "route_clear == true"
+    steps:
+      - "RETRIEVE_MEDICATION"
+      - "NAVIGATE_TO_PATIENT_ROOM"
+      - "VERIFY_PATIENT_ID"
+      - "HAND_OVER_MEDICATION"
+      - "RECORD_ADMINISTRATION"
+    max_duration: 600
+    temperature_control: true
+
+  - id: medical_action_002
+    name: "Specimen transport"
+    description: "Transport lab specimens to laboratory"
+    preconditions:
+      - "specimen_container_sealed == true"
+      - "lab_requisition_complete == true"
+      - "transport_container_available == true"
+    steps:
+      - "PLACE_IN_TRANSPORT_CONTAINER"
+      - "SELECT_OPTIMAL_ROUTE"
+      - "DELIVER_TO_LAB"
+      - "OBTAIN_RECEIPT"
+      - "DECONTAMINATE"
+    max_duration: 900
+    temperature_maintenance: [2, 8]
+
+  - id: medical_action_003
+    name: "Surgical instrument assistance"
+    description: "Assist surgeon with instrument handling"
+    preconditions:
+      - "robot_sterilized == true"
+      - "surgeon_ready == true"
+      - "instruments_prepared == true"
+    steps:
+      - "POSITION_AT_STERILE_FIELD"
+      - "PRESENT_INSTRUMENT"
+      - "RETRIEVE_USED_INSTRUMENT"
+      - "CLEAN_INSTRUMENT"
+      - "REPOSITION_AS_REQUESTED"
+    max_duration: 3600
+    sterility_maintenance: true
+
+  - id: medical_action_004
+    name: "Patient monitoring round"
+    description: "Perform routine patient monitoring"
+    preconditions:
+      - "patient_consent_obtained == true"
+      - "monitoring_equipment_ready == true"
+      - "privacy_maintained == true"
+    steps:
+      - "APPROACH_PATIENT_BEDSIDE"
+      - "COLLECT_VITAL_SIGNS"
+      - "DOCUMENT_OBSERVATIONS"
+      - "ALERT_IF_ABNORMAL"
+      - "PROVIDE_REASSURANCE"
+    max_duration: 300
+    data_privacy: "HIPAA_COMPLIANT"
+
+  - id: medical_action_005
+    name: "Emergency supply delivery"
+    description: "Deliver emergency supplies to code location"
+    preconditions:
+      - "emergency_code_called == true"
+      - "supplies_identified == true"
+      - "path_cleared == true"
+    steps:
+      - "LOAD_EMERGENCY_CART"
+      - "NAVIGATE_VIA_EMERGENCY_ROUTE"
+      - "DELIVER_TO_CODE_TEAM"
+      - "ASSIST_AS_DIRECTED"
+      - "RESET_AFTER_CODE"
+    max_duration: 180
+    emergency_override: true
+
+  - id: medical_action_006
+    name: "Physical therapy assistance"
+    description: "Assist with physical therapy exercises"
+    preconditions:
+      - "therapist_present == true"
+      - "exercise_plan_loaded == true"
+      - "patient_stable == true"
+    steps:
+      - "DEMONSTRATE_EXERCISE"
+      - "GUIDE_PATIENT_MOVEMENT"
+      - "PROVIDE_SUPPORT"
+      - "MONITOR_FATIGUE"
+      - "RECORD_PROGRESS"
+    max_duration: 1800
+    force_limits: [5, 50]
+
+  - id: medical_action_007
+    name: "Room cleaning and disinfection"
+    description: "Clean and disinfect patient room after discharge"
+    preconditions:
+      - "room_vacated == true"
+      - "cleaning_supplies_available == true"
+      - "ppe_available == true"
+    steps:
+      - "DON_PPE"
+      - "REMOVE_LINENS"
+      - "DISINFECT_SURFACES"
+      - "RESTOCK_SUPPLIES"
+      - "VERIFY_CLEANLINESS"
+    max_duration: 1800
+    disinfection_standard: "CDC_GUIDELINES"
+
+  - id: medical_action_008
+    name: "Medical imaging positioning"
+    description: "Position patient for medical imaging"
+    preconditions:
+      - "imaging_technician_ready == true"
+      - "patient_cooperative == true"
+      - "positioning_guidelines_loaded == true"
+    steps:
+      - "ASSESS_PATIENT_POSITION"
+      - "ADJUST_POSITIONING_AIDS"
+      - "VERIFY_ALIGNMENT"
+      - "MAINTAIN_POSITION_DURING_SCAN"
+      - "ASSIST_TRANSFER"
+    max_duration: 600
+    radiation_safety: true
+
+  - id: medical_action_009
+    name: "Pharmacy inventory management"
+    description: "Manage pharmacy inventory and restocking"
+    preconditions:
+      - "inventory_system_accessible == true"
+      - "storage_areas_accessible == true"
+      - "expiry_date_check_complete == true"
+    steps:
+      - "SCAN_INVENTORY_LEVELS"
+      - "GENERATE_RESTOCK_LIST"
+      - "RETRIEVE_ITEMS_FROM_STORAGE"
+      - "RESTOCK_SHELVES"
+      - "UPDATE_INVENTORY_RECORDS"
+    max_duration: 3600
+    controlled_substance_protocols: true
+
+  - id: medical_action_010
+    name: "Patient discharge assistance"
+    description: "Assist with patient discharge process"
+    preconditions:
+      - "discharge_ordered == true"
+      - "patient_ambulatory == true"
+      - "belongings_collected == true"
+    steps:
+      - "PROVIDE_DISCHARGE_INSTRUCTIONS"
+      - "ASSIST_WITH_PACKING"
+      - "ESCORT_TO_DISCHARGE_LOBBY"
+      - "ARRANGE_TRANSPORTATION"
+      - "CONFIRM_DEPARTURE"
+    max_duration: 1200
+    follow_up_coordination: true
+
+constraints:
+  - id: medical_constraint_001
+    name: "Sterility maintenance"
+    description: "Must maintain sterility in surgical environments"
+    type: "STERILITY"
+    parameters:
+      air_quality_standard: "ISO_14644_CLASS_5"
+      surface_contamination_limit: 0
+      gowning_protocol: true
+      traffic_control: true
+
+  - id: medical_constraint_002
+    name: "Patient privacy compliance"
+    description: "Must comply with patient privacy regulations"
+    type: "PRIVACY"
+    parameters:
+      hipaa_compliant: true
+      data_encryption: true
+      audit_trail: true
+      consent_management: true
+
+  - id: medical_constraint_003
+    name: "Medication safety protocols"
+    description: "Must follow medication safety protocols"
+    type: "MEDICATION_SAFETY"
+    parameters:
+      five_rights_verification: true
+      barcode_scanning: true
+      allergy_check: true
+      interaction_check: true
+
+  - id: medical_constraint_004
+    name: "Infection control"
+    description: "Must follow infection control protocols"
+    type: "INFECTION_CONTROL"
+    parameters:
+      hand_hygiene_compliance: true
+      contact_precautions: true
+      droplet_precautions: true
+      airborne_precautions: true
+
+  - id: medical_constraint_005
+    name: "Emergency response readiness"
+    description: "Must be ready for emergency response"
+    type: "EMERGENCY_RESPONSE"
+    parameters:
+      response_time: 60
+      emergency_override_capability: true
+      backup_power: true
+      communication_redundancy: true
+
+  - id: medical_constraint_006
+    name: "Radiation safety"
+    description: "Must follow radiation safety protocols"
+    type: "RADIATION_SAFETY"
+    parameters:
+      time_distance_shielding: true
+      dosimetry_monitoring: true
+      pregnant_worker_protection: true
+      contamination_control: true
+
+  - id: medical_constraint_007
+    name: "Biological safety"
+    description: "Must follow biological safety protocols"
+    type: "BIOSAFETY"
+    parameters:
+      biosafety_level_compliance: true
+      spill_management: true
+      waste_disposal_protocols: true
+      decontamination_procedures: true
+
+  - id: medical_constraint_008
+    name: "Medical device regulations"
+    description: "Must comply with medical device regulations"
+    type: "REGULATORY"
+    parameters:
+      fda_compliant: true
+      ce_marked: true
+      quality_system: "ISO_13485"
+      clinical_validation: true
+
+  - id: medical_constraint_009
+    name: "Patient dignity and respect"
+    description: "Must maintain patient dignity and respect"
+    type: "ETHICAL"
+    parameters:
+      informed_consent: true
+      cultural_sensitivity: true
+      disability_accommodation: true
+      end_of_life_respect: true
+
+  - id: medical_constraint_010
+    name: "Clinical workflow integration"
+    description: "Must integrate seamlessly with clinical workflows"
+    type: "WORKFLOW"
+    parameters:
+      ehr_integration: true
+      staff_notification_system: true
+      priority_management: true
+      downtime_procedures: true

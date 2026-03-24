@@ -1,0 +1,173 @@
+# Hardware Constraint Rules — Unitree H1 / Go2 / Generic
+# Source: Unitree Go2 User Manual, H1 hardware specs
+#         (_ontorobotic/raw_sources/unitree_hardware/)
+#
+# These rules enforce physical limits of the robot hardware
+# and are independent of regulatory standards.
+
+rules:
+
+  # ── EMERGENCY ──────────────────────────────────────────────────────────
+
+  - id: HW-LOW-BATTERY-AUTO-CROUCH
+    name: "Battery <10% → seek charger (H1 auto-crouch prevention)"
+    layer: emergency
+    source:
+      document: "Unitree H1 manual"
+      section: "Battery behavior"
+      standard: "Hardware"
+    condition:
+      field: robot.battery_level
+      operator: lt
+      value: 10
+    action:
+      type: dock_to_charger
+      params:
+        reason: "Battery <10%: auto-crouch imminent within 10 min (head_light_yellow_flashing)"
+      override: true
+    explanation: "H1: Below 10% battery the robot automatically crouches within 10 min; seek charger immediately"
+    tags: [hardware, battery, h1, emergency]
+
+  - id: HW-DAMPING-MODE-OVERRIDE
+    name: "Hardware safety mode overrides autonomous control"
+    layer: emergency
+    source:
+      document: "Unitree Go2/H1 manual"
+      section: "Hardware modes"
+      standard: "Hardware"
+    condition:
+      field: robot.hardware_mode
+      operator: in
+      value: ["damping_mode", "locking_posture", "rocker_manual_mode"]
+    action:
+      type: stop
+      params:
+        reason: "Hardware mode (damping/locking/manual) active — autonomous commands blocked"
+      override: true
+    explanation: "damping_mode, locking_posture, rocker_manual_mode each override autonomous motion"
+    tags: [hardware, mode, override, emergency]
+
+  - id: HW-CALIBRATION-BLOCK
+    name: "Block motion during IMU/motor calibration"
+    layer: emergency
+    source:
+      document: "Unitree Go2/H1 manual"
+      section: "Calibration sequence"
+      standard: "Hardware"
+    condition:
+      field: robot.calibration_in_progress
+      operator: eq
+      value: true
+    action:
+      type: stop
+      params:
+        reason: "IMU/motor calibration in progress (head_light_blue_slow) — joints unavailable"
+      override: true
+    explanation: "H1: IMU/motor calibration underway → motor control unavailable; must not issue motion commands"
+    tags: [hardware, calibration, emergency]
+
+  - id: HW-SYSTEM-ABNORMALITY
+    name: "Stop on system abnormality indicator"
+    layer: emergency
+    source:
+      document: "Unitree Go2/H1 manual"
+      section: "Status indicators"
+      standard: "Hardware"
+    condition:
+      field: robot.system_abnormality
+      operator: eq
+      value: true
+    action:
+      type: stop
+      params:
+        reason: "System abnormality detected (head_light_red_slow_flashing)"
+      override: true
+    explanation: "H1 system abnormality indicator (red slow flashing) → undefined hardware behavior; stop immediately"
+    tags: [hardware, abnormality, emergency]
+
+  # ── HARD CONSTRAINTS ───────────────────────────────────────────────────
+
+  - id: HW-MAX-SPEED-ADVISORY
+    name: "Enforce advisory mode speed cap"
+    layer: hard
+    source:
+      document: "Unitree H1 manual + trust-layer mode_controller"
+      section: "Advisory mode"
+      standard: "Hardware+TrustLayer"
+    condition:
+      and:
+        - field: robot.mode
+          operator: in
+          value: ["ADVISORY", "SHADOW"]
+        - field: action.speed_mps
+          operator: gt
+          value: 1.5
+    forbidden_actions: [navigate]
+    explanation: "Trust-layer advisory mode caps speed at 1.5 m/s (from safety_edge command_clamp.py)"
+    tags: [hardware, speed, advisory]
+
+  - id: HW-OPERATING-TEMPERATURE
+    name: "Operation outside temperature range forbidden"
+    layer: hard
+    source:
+      document: "Unitree Go2/H1 manual"
+      section: "Environmental specifications"
+      standard: "Hardware"
+    condition:
+      or:
+        - field: robot.temperature_c
+          operator: lt
+          value: 5
+        - field: robot.temperature_c
+          operator: gt
+          value: 35
+    forbidden_actions: [navigate, pick, place]
+    explanation: "H1/Go2: Operating temperature must be 5-35°C; outside range causes hardware degradation"
+    tags: [hardware, temperature]
+
+  - id: HW-STAIR-MAX-ANGLE
+    name: "Stair climbing angle limit"
+    layer: hard
+    source:
+      document: "Unitree Go2 manual"
+      section: "Stair mode"
+      standard: "Hardware"
+    condition:
+      field: action.incline_deg
+      operator: gt
+      value: 40
+    forbidden_actions: [navigate]
+    explanation: "Go2/H1: Maximum stair/ramp climbing angle is 40 degrees"
+    tags: [hardware, stairs, incline]
+
+  - id: HW-STAIR-MAX-HEIGHT
+    name: "Single stair step height limit"
+    layer: hard
+    source:
+      document: "Unitree Go2 manual"
+      section: "Stair mode"
+      standard: "Hardware"
+    condition:
+      field: action.step_height_cm
+      operator: gt
+      value: 16
+    forbidden_actions: [navigate]
+    explanation: "Go2/H1: Maximum single stair step height is 16 cm"
+    tags: [hardware, stairs, step_height]
+
+  # ── POLICY ─────────────────────────────────────────────────────────────
+
+  - id: HW-COMM-RANGE-POLICY
+    name: "Stay within remote control range"
+    layer: policy
+    source:
+      document: "Unitree Go2/H1 manual"
+      section: "Remote control specs"
+      standard: "Hardware"
+    condition:
+      field: robot.distance_to_operator_m
+      operator: gt
+      value: 15
+    penalty: 20
+    explanation: "Go2 remote control effective range is 15m; beyond this manual override is not reliable"
+    tags: [hardware, policy, comm, range]

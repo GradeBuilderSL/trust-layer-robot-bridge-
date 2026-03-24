@@ -1,0 +1,123 @@
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix rm:   <https://ontology.partenit.ai/robomind#> .
+@prefix wh:   <https://ontology.partenit.ai/warehouse#> .
+
+# ─── Ontology Header ───────────────────────────────────────────────────────
+<https://ontology.partenit.ai/warehouse>
+    a owl:Ontology ;
+    owl:imports <https://ontology.partenit.ai/robomind> ;
+    rdfs:label "Warehouse Environment Ontology"@en ;
+    rdfs:comment "Domain ontology for warehouse robot deployments."@en ;
+    owl:versionInfo "1.0.0" .
+
+# ─── Warehouse-Specific Classes ────────────────────────────────────────────
+
+wh:StorageZone a owl:Class ;
+    rdfs:subClassOf rm:Zone ;
+    rdfs:label "StorageZone"@en ;
+    rdfs:comment "Area where goods are stored on shelves or racks."@en .
+
+wh:HumanZone a owl:Class ;
+    rdfs:subClassOf rm:SafetyZone ;
+    rdfs:label "HumanZone"@en ;
+    rdfs:comment "Area regularly occupied by human workers. Strict speed and clearance limits."@en .
+
+wh:TransitAisle a owl:Class ;
+    rdfs:subClassOf rm:Zone ;
+    rdfs:label "TransitAisle"@en ;
+    rdfs:comment "Primary robot transit corridor."@en .
+
+wh:LoadingDock a owl:Class ;
+    rdfs:subClassOf rm:Zone ;
+    rdfs:label "LoadingDock"@en .
+
+wh:ChargingStation a owl:Class ;
+    rdfs:subClassOf rm:Zone ;
+    rdfs:label "ChargingStation"@en .
+
+wh:PackingStation a owl:Class ;
+    rdfs:subClassOf rm:Zone ;
+    rdfs:label "PackingStation"@en .
+
+wh:EmergencyExit a owl:Class ;
+    rdfs:subClassOf rm:Zone ;
+    rdfs:label "EmergencyExit"@en .
+
+# Physical objects
+wh:Shelf a owl:Class ;
+    rdfs:subClassOf rm:PhysicalEntity ;
+    rdfs:label "Shelf"@en .
+
+wh:ConveyorBelt a owl:Class ;
+    rdfs:subClassOf rm:PhysicalEntity ;
+    rdfs:label "ConveyorBelt"@en .
+
+wh:Door a owl:Class ;
+    rdfs:subClassOf rm:PhysicalEntity ;
+    rdfs:label "Door"@en .
+
+wh:Pallet a owl:Class ;
+    rdfs:subClassOf rm:PhysicalEntity ;
+    rdfs:label "Pallet"@en .
+
+wh:Worker a owl:Class ;
+    rdfs:subClassOf rm:DynamicEntity ;
+    rdfs:label "Worker"@en .
+
+wh:Forklift a owl:Class ;
+    rdfs:subClassOf rm:DynamicEntity ;
+    rdfs:label "Forklift"@en .
+
+# ─── Default Warehouse Constraint Rules ────────────────────────────────────
+
+wh:rule_human_zone_speed a rm:ConstraintRule ;
+    rdfs:label "Human zone speed limit"@en ;
+    rm:stlFormula "G(inHumanZone → speed < 0.3)" ;
+    rm:constraintSource "regulation" .
+
+wh:rule_human_zone_clearance a rm:ConstraintRule ;
+    rdfs:label "Human clearance minimum"@en ;
+    rm:stlFormula "G(inHumanZone → distance_to_human > 1.5)" ;
+    rm:constraintSource "regulation" .
+
+wh:rule_loading_dock_speed a rm:ConstraintRule ;
+    rdfs:label "Loading dock speed limit"@en ;
+    rm:stlFormula "G(inLoadingDock → speed < 0.5)" ;
+    rm:constraintSource "operator" .
+
+wh:rule_emergency_exit_clear a rm:ConstraintRule ;
+    rdfs:label "Emergency exit must be unblocked"@en ;
+    rm:stlFormula "G(NOT blocksEmergencyExit)" ;
+    rm:constraintSource "regulation" .
+
+# ─── Archetype Zone Instances (templates) ──────────────────────────────────
+
+wh:TemplateHumanZone a wh:HumanZone ;
+    rdfs:label "Template: Human Zone"@en ;
+    rm:maxSpeedMps "0.3"^^xsd:double ;
+    rm:minClearanceM "1.5"^^xsd:double ;
+    rm:accessLevel "1"^^xsd:integer ;
+    rm:hasConstraint wh:rule_human_zone_speed ;
+    rm:hasConstraint wh:rule_human_zone_clearance .
+
+wh:TemplateTransitAisle a wh:TransitAisle ;
+    rdfs:label "Template: Transit Aisle"@en ;
+    rm:maxSpeedMps "1.5"^^xsd:double ;
+    rm:minClearanceM "0.5"^^xsd:double ;
+    rm:accessLevel "0"^^xsd:integer .
+
+wh:TemplateLoadingDock a wh:LoadingDock ;
+    rdfs:label "Template: Loading Dock"@en ;
+    rm:maxSpeedMps "0.5"^^xsd:double ;
+    rm:minClearanceM "1.0"^^xsd:double ;
+    rm:accessLevel "1"^^xsd:integer ;
+    rm:hasConstraint wh:rule_loading_dock_speed .
+
+wh:TemplateStorageZone a wh:StorageZone ;
+    rdfs:label "Template: Storage Zone"@en ;
+    rm:maxSpeedMps "0.8"^^xsd:double ;
+    rm:minClearanceM "0.3"^^xsd:double ;
+    rm:accessLevel "0"^^xsd:integer .

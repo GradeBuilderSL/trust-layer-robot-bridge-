@@ -1,0 +1,130 @@
+---
+# ISO 12100:2010 — Safety of machinery — General principles for design
+# Framework-level advisory/policy rules for risk assessment and protective measures.
+
+rules:
+
+  - id: ISO12100-RISK-ASSESSMENT-001
+    name: "Risk assessment performed before enabling FULL mode"
+    layer: policy
+    standard: "ISO 12100:2010"
+    section: "4.1"
+    audit_ref: "ISO 12100:2010 §4.1"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 12100:2010"
+      section: "4.1"
+      standard: "ISO"
+    condition:
+      and:
+        - field: robot.mode
+          operator: eq
+          value: "FULL"
+        - field: robot.risk_assessment_done
+          operator: eq
+          value: false
+    penalty: 20.0
+    explanation: "ISO 12100:2010 requires formal risk assessment before enabling full autonomous operation."
+    tags: [iso12100, risk_assessment]
+
+  - id: ISO12100-INHERENT-SAFETY-001
+    name: "Inherently safe design preferred over procedural controls"
+    layer: advisory
+    standard: "ISO 12100:2010"
+    section: "6.2"
+    audit_ref: "ISO 12100:2010 §6.2"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 12100:2010"
+      section: "6.2"
+      standard: "ISO"
+    condition:
+      field: design.inherent_safety_used
+      operator: eq
+      value: false
+    penalty: 5.0
+    explanation: "Design does not use inherent safety measures where feasible; advisory per ISO 12100:2010 hierarchy."
+    tags: [iso12100, design, hierarchy]
+
+  - id: ISO12100-HIERARCHY-001
+    name: "Protective measures hierarchy compliance"
+    layer: policy
+    standard: "ISO 12100:2010"
+    section: "6.1"
+    audit_ref: "ISO 12100:2010 §6.1"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 12100:2010"
+      section: "6.1"
+      standard: "ISO"
+    condition:
+      field: design.protective_hierarchy_followed
+      operator: eq
+      value: false
+    penalty: 15.0
+    explanation: "Protective measures hierarchy not followed: inherent safe → safeguarding → information (ISO 12100:2010 §6.1)."
+    tags: [iso12100, hierarchy, protective]
+
+  - id: ISO12100-MECH-CRUSH-001
+    name: "Protection against crushing hazard"
+    layer: hard
+    standard: "ISO 12100:2010"
+    section: "6.2.2"
+    audit_ref: "ISO 12100:2010 §6.2.2"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 12100:2010"
+      section: "6.2.2"
+      standard: "ISO"
+    condition:
+      field: robot.crush_hazard_present
+      operator: eq
+      value: true
+    forbidden_actions: [navigate, manipulate]
+    explanation: "Crushing hazard detected — movement blocked (ISO 12100:2010 §6.2.2)."
+    tags: [iso12100, crush, mechanical]
+
+  - id: ISO12100-MECH-SHEAR-001
+    name: "Protection against shearing hazard"
+    layer: hard
+    standard: "ISO 12100:2010"
+    section: "6.2.2"
+    audit_ref: "ISO 12100:2010 §6.2.2"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 12100:2010"
+      section: "6.2.2"
+      standard: "ISO"
+    condition:
+      field: robot.shear_hazard_present
+      operator: eq
+      value: true
+    forbidden_actions: [navigate, manipulate]
+    explanation: "Shearing hazard detected — movement blocked (ISO 12100:2010 §6.2.2)."
+    tags: [iso12100, shear, mechanical]
+
+  - id: ISO12100-MECH-ENTANGLE-001
+    name: "Protection against entanglement"
+    layer: hard
+    standard: "ISO 12100:2010"
+    section: "6.2.2"
+    audit_ref: "ISO 12100:2010 §6.2.2"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 12100:2010"
+      section: "6.2.2"
+      standard: "ISO"
+    condition:
+      field: robot.entanglement_hazard_present
+      operator: eq
+      value: true
+    forbidden_actions: [navigate, manipulate]
+    explanation: "Entanglement hazard detected — movement blocked (ISO 12100:2010 §6.2.2)."
+    tags: [iso12100, entanglement, mechanical]
+

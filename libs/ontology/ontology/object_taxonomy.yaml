@@ -1,0 +1,321 @@
+# Object Taxonomy — standard hierarchy for Trust Layer
+#
+# Based on KnowRob (University of Bremen, BSD) and SOMA affordance model.
+# Subset relevant for warehouse, exhibition, and service robot domains.
+#
+# Each node has:
+#   parent: parent class (null for root)
+#   stability: structural | semi_static | dynamic | ephemeral
+#   dispositions: list of affordance dispositions (from SOMA)
+#   safety_tags: list of safety-relevant properties
+#   aliases: list of alternative labels for NLU matching
+#
+# Usage:
+#   from ontology.object_taxonomy import ObjectTaxonomy
+#   tax = ObjectTaxonomy()
+#   tax.parent_of("CardboardBox")  # → "Box"
+#   tax.ancestors("CardboardBox")  # → ["Box", "Container", "PhysicalObject"]
+#   tax.stability("CardboardBox")  # → "dynamic"
+#   tax.dispositions("GlassPanel") # → ["breakable", "sharp_when_broken", "transparent"]
+
+PhysicalObject:
+  parent: null
+  stability: dynamic
+  dispositions: []
+  safety_tags: []
+  aliases: [object, thing, item]
+
+# ── Containers ──────────────────────────────────────────────────────
+
+Container:
+  parent: PhysicalObject
+  stability: dynamic
+  dispositions: [containable, liftable]
+  safety_tags: []
+  aliases: [container, емкость]
+
+Box:
+  parent: Container
+  stability: dynamic
+  dispositions: [liftable, stackable]
+  safety_tags: []
+  aliases: [box, коробка, ящик]
+
+CardboardBox:
+  parent: Box
+  stability: dynamic
+  dispositions: [liftable, stackable, crushable]
+  safety_tags: [CRUSH_RISK]
+  aliases: [cardboard box, картонная коробка]
+
+PlasticBin:
+  parent: Box
+  stability: dynamic
+  dispositions: [liftable, stackable, washable]
+  safety_tags: []
+  aliases: [plastic bin, пластиковый контейнер]
+
+Crate:
+  parent: Box
+  stability: dynamic
+  dispositions: [liftable, stackable, heavy_possible]
+  safety_tags: [CRUSH_RISK]
+  aliases: [crate, ящик, обрешётка]
+
+Pallet:
+  parent: Container
+  stability: semi_static
+  dispositions: [liftable_by_forklift, stackable]
+  safety_tags: [TRIP_RISK, CRUSH_RISK]
+  aliases: [pallet, паллет, поддон]
+
+Bag:
+  parent: Container
+  stability: dynamic
+  dispositions: [liftable, deformable]
+  safety_tags: []
+  aliases: [bag, мешок, пакет]
+
+Barrel:
+  parent: Container
+  stability: semi_static
+  dispositions: [rollable, heavy_possible, liquid_containable]
+  safety_tags: [CRUSH_RISK, SPILL_RISK]
+  aliases: [barrel, бочка]
+
+# ── Furniture ───────────────────────────────────────────────────────
+
+Furniture:
+  parent: PhysicalObject
+  stability: semi_static
+  dispositions: [supportive]
+  safety_tags: []
+  aliases: [furniture, мебель]
+
+Shelf:
+  parent: Furniture
+  stability: semi_static
+  dispositions: [supportive, climbable_hazard]
+  safety_tags: [FALLING_OBJECT_RISK]
+  aliases: [shelf, полка, стеллаж]
+
+Table:
+  parent: Furniture
+  stability: semi_static
+  dispositions: [supportive, surface_workspace]
+  safety_tags: []
+  aliases: [table, стол]
+
+Chair:
+  parent: Furniture
+  stability: semi_static
+  dispositions: [sittable, movable]
+  safety_tags: [TRIP_RISK]
+  aliases: [chair, стул, кресло]
+
+Rack:
+  parent: Furniture
+  stability: semi_static
+  dispositions: [supportive, tall_structure]
+  safety_tags: [FALLING_OBJECT_RISK, CRUSH_RISK]
+  aliases: [rack, стойка, стеллаж]
+
+Desk:
+  parent: Furniture
+  stability: semi_static
+  dispositions: [supportive, surface_workspace]
+  safety_tags: []
+  aliases: [desk, письменный стол, рабочий стол]
+
+Cabinet:
+  parent: Furniture
+  stability: semi_static
+  dispositions: [containable, lockable]
+  safety_tags: []
+  aliases: [cabinet, шкаф, тумба]
+
+# ── Equipment ───────────────────────────────────────────────────────
+
+Equipment:
+  parent: PhysicalObject
+  stability: dynamic
+  dispositions: []
+  safety_tags: []
+  aliases: [equipment, оборудование]
+
+Forklift:
+  parent: Equipment
+  stability: dynamic
+  dispositions: [drivable, lifting_capable, heavy]
+  safety_tags: [COLLISION_RISK, CRUSH_RISK]
+  aliases: [forklift, погрузчик, вилочный погрузчик]
+
+Cart:
+  parent: Equipment
+  stability: dynamic
+  dispositions: [pushable, rollable, loadable]
+  safety_tags: [COLLISION_RISK]
+  aliases: [cart, тележка, каталка]
+
+ConveyorBelt:
+  parent: Equipment
+  stability: semi_static
+  dispositions: [moving_surface, entanglement_hazard]
+  safety_tags: [ENTANGLEMENT_RISK, JAM_RISK]
+  aliases: [conveyor belt, конвейер, лента]
+
+Scanner:
+  parent: Equipment
+  stability: dynamic
+  dispositions: [handheld, electronic]
+  safety_tags: []
+  aliases: [scanner, сканер]
+
+# ── Safety Equipment ────────────────────────────────────────────────
+
+SafetyEquipment:
+  parent: Equipment
+  stability: semi_static
+  dispositions: [wall_mounted, emergency_use]
+  safety_tags: [DO_NOT_OBSTRUCT]
+  aliases: [safety equipment, средства безопасности]
+
+FireExtinguisher:
+  parent: SafetyEquipment
+  stability: semi_static
+  dispositions: [wall_mounted, pressurized]
+  safety_tags: [DO_NOT_OBSTRUCT, PRESSURIZED]
+  aliases: [fire extinguisher, огнетушитель]
+
+FirstAidKit:
+  parent: SafetyEquipment
+  stability: semi_static
+  dispositions: [wall_mounted]
+  safety_tags: [DO_NOT_OBSTRUCT]
+  aliases: [first aid kit, аптечка]
+
+EmergencyLight:
+  parent: SafetyEquipment
+  stability: structural
+  dispositions: [wall_mounted, ceiling_mounted]
+  safety_tags: [DO_NOT_OBSTRUCT]
+  aliases: [emergency light, аварийное освещение]
+
+# ── Humans ──────────────────────────────────────────────────────────
+Human:
+  parent: PhysicalObject
+  stability: ephemeral
+  dispositions: [autonomous_movement, unpredictable]
+  safety_tags: [COLLISION_RISK]
+  aliases: [human, person, человек]
+
+Worker:
+  parent: Human
+  stability: ephemeral
+  dispositions: [autonomous_movement, tool_usage]
+  safety_tags: [COLLISION_RISK]
+  aliases: [worker, рабочий, оператор]
+
+Visitor:
+  parent: Human
+  stability: ephemeral
+  dispositions: [autonomous_movement, unpredictable]
+  safety_tags: [COLLISION_RISK]
+  aliases: [visitor, посетитель, гость]
+
+Child:
+  parent: Human
+  stability: ephemeral
+  dispositions: [autonomous_movement, unpredictable, low_height]
+  safety_tags: [COLLISION_RISK, CRITICAL_PROXIMITY]
+  aliases: [child, kid, ребёнок]
+
+# ── Structures ─────────────────────────────────────────────────────
+
+Structure:
+  parent: PhysicalObject
+  stability: structural
+  dispositions: [immovable]
+  safety_tags: []
+  aliases: [structure, конструкция]
+
+Wall:
+  parent: Structure
+  stability: structural
+  dispositions: [immovable, barrier]
+  safety_tags: [COLLISION_RISK]
+  aliases: [wall, стена]
+
+Door:
+  parent: Structure
+  stability: structural
+  dispositions: [openable, closable, passage]
+  safety_tags: [PINCH_RISK]
+  aliases: [door, дверь]
+
+Pillar:
+  parent: Structure
+  stability: structural
+  dispositions: [immovable]
+  safety_tags: [COLLISION_RISK]
+  aliases: [pillar, column, колонна, столб]
+
+Window:
+  parent: Structure
+  stability: structural
+  dispositions: [breakable, transparent]
+  safety_tags: [BREAK_RISK]
+  aliases: [window, окно]
+
+# ── Hazardous ──────────────────────────────────────────────────────
+
+HazardSource:
+  parent: PhysicalObject
+  stability: semi_static
+  dispositions: [hazardous]
+  safety_tags: [NO_APPROACH]
+  aliases: [hazard, опасность]
+
+ChemicalStorage:
+  parent: HazardSource
+  stability: semi_static
+  dispositions: [hazardous, sealed]
+  safety_tags: [NO_APPROACH, CONTAMINATION_RISK]
+  aliases: [chemical storage, химическое хранилище]
+
+ElectricalPanel:
+  parent: HazardSource
+  stability: structural
+  dispositions: [hazardous, high_voltage]
+  safety_tags: [NO_APPROACH, ELECTRICAL_HAZARD]
+  aliases: [electrical panel, электрощит]
+
+HotSurface:
+  parent: HazardSource
+  stability: semi_static
+  dispositions: [hazardous, high_temperature]
+  safety_tags: [BURN_RISK]
+  aliases: [hot surface, горячая поверхность]
+
+# ── Fragile ────────────────────────────────────────────────────────
+
+GlassPanel:
+  parent: PhysicalObject
+  stability: structural
+  dispositions: [breakable, sharp_when_broken, transparent]
+  safety_tags: [BREAK_RISK, CUT_RISK]
+  aliases: [glass panel, glass, стекло, стеклянная панель]
+
+CeramicItem:
+  parent: PhysicalObject
+  stability: dynamic
+  dispositions: [breakable, sharp_when_broken]
+  safety_tags: [BREAK_RISK]
+  aliases: [ceramic, керамика]
+
+ElectronicDevice:
+  parent: PhysicalObject
+  stability: dynamic
+  dispositions: [breakable, electronic, sensitive_to_moisture]
+  safety_tags: [BREAK_RISK, ELECTRICAL_HAZARD]
+  aliases: [electronic device, электроника, прибор]

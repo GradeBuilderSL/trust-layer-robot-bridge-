@@ -1,0 +1,215 @@
+{
+  "name": "social_ontology",
+  "version": "1.0.0",
+  "description": "Social dynamics and human-robot interaction relationships",
+  "edges": [
+    {
+      "id": "soc_001",
+      "source": "personal_space",
+      "relation": "requires",
+      "target": "maintain_distance",
+      "weight": 0.93,
+      "properties": {
+        "distance_cultural_variation": "0.5-1.2m",
+        "context_dependent": true
+      }
+    },
+    {
+      "id": "soc_002",
+      "source": "elderly_person",
+      "relation": "prefers",
+      "target": "slower_movement",
+      "weight": 0.88,
+      "properties": {
+        "reason": "reaction_time",
+        "safety_consideration": "true"
+      }
+    },
+    {
+      "id": "soc_003",
+      "source": "child",
+      "relation": "may_approach",
+      "target": "moving_robot",
+      "weight": 0.85,
+      "properties": {
+        "risk": "unpredictable_movement",
+        "mitigation": "heightened_vigilance"
+      }
+    },
+    {
+      "id": "soc_004",
+      "source": "group_conversation",
+      "relation": "should_avoid",
+      "target": "robot_interruption",
+      "weight": 0.91,
+      "properties": {
+        "social_norm": "respect_privacy",
+        "exception": "emergency"
+      }
+    },
+    {
+      "id": "soc_005",
+      "source": "hospital_zone",
+      "relation": "requires",
+      "target": "quiet_operation",
+      "weight": 0.96,
+      "properties": {
+        "decibel_limit": "50 dB",
+        "time_of_day": "all_hours"
+      }
+    },
+    {
+      "id": "soc_006",
+      "source": "guide_robot",
+      "relation": "should_maintain",
+      "target": "eye_contact_level",
+      "weight": 0.82,
+      "properties": {
+        "purpose": "establish_trust",
+        "cultural_differences": "significant"
+      }
+    },
+    {
+      "id": "soc_007",
+      "source": "delivery_robot",
+      "relation": "should_announce",
+      "target": "arrival",
+      "weight": 0.89,
+      "properties": {
+        "method": ["audible_signal", "visual_light"],
+        "advance_notice": "10_seconds"
+      }
+    },
+    {
+      "id": "soc_008",
+      "source": "crowded_area",
+      "relation": "requires",
+      "target": "reduced_speed",
+      "weight": 0.95,
+      "properties": {
+        "speed_limit": "0.5 m/s",
+        "stopping_distance": "1.0 m"
+      }
+    },
+    {
+      "id": "soc_009",
+      "source": "visually_impaired_person",
+      "relation": "benefits_from",
+      "target": "auditory_cues",
+      "weight": 0.87,
+      "properties": {
+        "cue_type": ["verbal_announcement", "distinctive_sound"],
+        "volume_adjustment": "based_on_ambient_noise"
+      }
+    },
+    {
+      "id": "soc_010",
+      "source": "cultural_event",
+      "relation": "may_require",
+      "target": "special_attire",
+      "weight": 0.76,
+      "properties": {
+        "examples": ["festival", "religious_ceremony"],
+        "adaptation": "context_aware"
+      }
+    },
+    {
+      "id": "soc_011",
+      "source": "security_robot",
+      "relation": "should_project",
+      "target": "authority_presence",
+      "weight": 0.84,
+      "properties": {
+        "indicators": ["upright_posture", "steady_movement", "clear_visibility"]
+      }
+    },
+    {
+      "id": "soc_012",
+      "source": "educational_setting",
+      "relation": "requires",
+      "target": "interactive_engagement",
+      "weight": 0.90,
+      "properties": {
+        "age_appropriate": true,
+        "learning_style_accommodation": "multiple_modalities"
+      }
+    },
+    {
+      "id": "soc_013",
+      "source": "retail_environment",
+      "relation": "should_avoid",
+      "target": "blocking_aisles",
+      "weight": 0.94,
+      "properties": {
+        "minimum_clearance": "1.2 m",
+        "dwell_time_limit": "30 seconds"
+      }
+    },
+    {
+      "id": "soc_014",
+      "source": "night_operation",
+      "relation": "requires",
+      "target": "minimal_light_disturbance",
+      "weight": 0.88,
+      "properties": {
+        "light_level": "dim",
+        "motion_activated": "preferred"
+      }
+    },
+    {
+      "id": "soc_015",
+      "source": "emergency_situation",
+      "relation": "prioritizes",
+      "target": "clear_communication",
+      "weight": 0.97,
+      "properties": {
+        "communication_style": "calm_authoritative",
+        "repetition": "important"
+      }
+    },
+    {
+      "id": "soc_016",
+      "source": "assistive_robot",
+      "relation": "should_respect",
+      "target": "user_autonomy",
+      "weight": 0.92,
+      "properties": {
+        "consent_required": true,
+        "override_capability": "emergency_only"
+      }
+    },
+    {
+      "id": "soc_017",
+      "source": "public_transport",
+      "relation": "requires",
+      "target": "predictable_path",
+      "weight": 0.86,
+      "properties": {
+        "path_visibility": "high",
+        "sudden_movements": "avoid"
+      }
+    },
+    {
+      "id": "soc_018",
+      "source": "language_barrier",
+      "relation": "requires",
+      "target": "visual_communication",
+      "weight": 0.83,
+      "properties": {
+        "methods": ["icons", "gestures", "universal_symbols"],
+        "simplicity": "key"
+      }
+    },
+    {
+      "id": "soc_019",
+      "source": "robot_appearance",
+      "relation": "affects",
+      "target": "human_comfort",
+      "weight": 0.79,
+      "properties": {
+        "factors": ["size", "color", "anthropomorphism"],
+        "uncanny_valley": "consideration"
+      }
+    }
+  ]
+}

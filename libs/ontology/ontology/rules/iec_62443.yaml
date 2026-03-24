@@ -1,0 +1,135 @@
+---
+# IEC 62443 — Industrial communication networks – IT security for networks and systems
+# Cybersecurity-related safety constraints for industrial robots/AMR.
+# NOTE: Partial initial rule set; expand with more detailed requirements as needed.
+
+rules:
+
+  - id: IEC62443-INTEGRITY-001
+    name: "Safety control logic integrity violation"
+    layer: hard
+    standard: "IEC 62443-3-3"
+    section: "SR 3.6"
+    audit_ref: "IEC 62443-3-3 SR 3.6 – Deterministic Output"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "IEC 62443-3-3"
+      section: "SR 3.6"
+      standard: "IEC"
+    condition:
+      field: robot.safety_logic_integrity_ok
+      operator: eq
+      value: false
+    forbidden_actions: [navigate, pick, place, manipulate]
+    explanation: "Integrity check for safety-related control logic failed; block hazardous motion per IEC 62443-3-3 SR 3.6."
+    tags: [iec62443, cybersecurity, integrity]
+
+  - id: IEC62443-AUTH-001
+    name: "Unauthorized remote control command"
+    layer: hard
+    standard: "IEC 62443-3-3"
+    section: "SR 1.2"
+    audit_ref: "IEC 62443-3-3 SR 1.2 – Software Process and Device Identification and Authentication"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "IEC 62443-3-3"
+      section: "SR 1.2"
+      standard: "IEC"
+    condition:
+      and:
+        - field: robot.control_channel_secure
+          operator: eq
+          value: false
+        - field: action.type
+          operator: in
+          value: ["navigate", "pick", "place", "manipulate"]
+    forbidden_actions: [navigate, pick, place, manipulate]
+    explanation: "Remote control channel not authenticated/secure; hazardous commands blocked per IEC 62443-3-3 SR 1.2."
+    tags: [iec62443, cybersecurity, auth]
+
+  - id: IEC62443-UPDATE-001
+    name: "Unsafe software update state"
+    layer: hard
+    standard: "IEC 62443-2-3"
+    section: "Req 6"
+    audit_ref: "IEC 62443-2-3 Req 6 – Patch Management of Software Update Delivery"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "IEC 62443-2-3"
+      section: "Req 6"
+      standard: "IEC"
+    condition:
+      and:
+        - field: robot.software_update_in_progress
+          operator: eq
+          value: true
+        - field: robot.safety_update_verified
+          operator: eq
+          value: false
+    forbidden_actions: [navigate, pick, place, manipulate]
+    explanation: "Safety-related software update in progress and not yet verified; hazardous motion disabled per IEC 62443-2-3 Req 6."
+    tags: [iec62443, cybersecurity, update]
+
+  - id: IEC62443-NETWORK-001
+    name: "OT/IT network segmentation"
+    layer: policy
+    standard: "IEC 62443-3-3"
+    section: "SR 5.1"
+    audit_ref: "IEC 62443-3-3 SR 5.1"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "IEC 62443-3-3"
+      section: "SR 5.1"
+      standard: "IEC"
+    condition:
+      field: network.ot_it_segmented
+      operator: eq
+      value: false
+    penalty: 20.0
+    explanation: "OT/IT network segmentation not implemented (IEC 62443-3-3 SR 5.1)."
+    tags: [iec62443, network, segmentation]
+
+  - id: IEC62443-AUDIT-LOG-001
+    name: "Security event logging"
+    layer: policy
+    standard: "IEC 62443-3-3"
+    section: "SR 6.1"
+    audit_ref: "IEC 62443-3-3 SR 6.1"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "IEC 62443-3-3"
+      section: "SR 6.1"
+      standard: "IEC"
+    condition:
+      field: security.event_logging_enabled
+      operator: eq
+      value: false
+    penalty: 15.0
+    explanation: "Security event logging not enabled (IEC 62443-3-3 SR 6.1)."
+    tags: [iec62443, audit, logging]
+
+  - id: IEC62443-PATCH-001
+    name: "Security patch management"
+    layer: advisory
+    standard: "IEC 62443-2-3"
+    section: "SR 7.6"
+    audit_ref: "IEC 62443-2-3 SR 7.6"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "IEC 62443-2-3"
+      section: "SR 7.6"
+      standard: "IEC"
+    condition:
+      field: security.patch_management_ok
+      operator: eq
+      value: false
+    penalty: 8.0
+    explanation: "Security patch management process not in place (IEC 62443-2-3 SR 7.6)."
+    tags: [iec62443, patch, management]
+

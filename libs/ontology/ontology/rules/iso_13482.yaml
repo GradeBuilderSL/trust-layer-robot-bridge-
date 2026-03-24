@@ -1,0 +1,134 @@
+---
+# ISO 13482:2014 — Safety requirements for personal care robots
+# Partial set of rules targeting humanoid / person-carrier deployments.
+
+rules:
+
+  - id: ISO13482-CONTACT-FORCE-001
+    name: "Contact force limits for personal care robots"
+    layer: hard
+    standard: "ISO 13482:2014"
+    section: "5.5"
+    audit_ref: "ISO 13482:2014 §5.5"
+    applicable_robots: ["humanoid", "personal_care"]
+    jurisdiction: ["INTL", "EU"]
+    source:
+      document: "ISO 13482:2014"
+      section: "5.5"
+      standard: "ISO"
+    condition:
+      field: robot.contact_force_n
+      operator: gt
+      value: "robot.iso13482_max_contact_force_n"
+    forbidden_actions: [navigate, manipulate]
+    explanation: "Personal care robot contact force exceeded allowed limit per ISO 13482:2014 §5.5."
+    tags: [iso13482, force, contact]
+
+  - id: ISO13482-SPEED-NEAR-HUMAN-001
+    name: "Reduced speed near assisted person"
+    layer: policy
+    standard: "ISO 13482:2014"
+    section: "5.3"
+    audit_ref: "ISO 13482:2014 §5.3"
+    applicable_robots: ["humanoid", "personal_care"]
+    jurisdiction: ["INTL", "EU"]
+    source:
+      document: "ISO 13482:2014"
+      section: "5.3"
+      standard: "ISO"
+    condition:
+      and:
+        - field: zone.assisted_person_present
+          operator: eq
+          value: true
+        - field: action.speed_mps
+          operator: gt
+          value: 0.5
+    penalty: 30.0
+    explanation: "Assisted person nearby — recommended reduced speed for comfort and safety (ISO 13482:2014 §5.3)."
+    tags: [iso13482, speed, hri]
+
+  - id: ISO13482-STABILITY-001
+    name: "Stability — robot must not tip over"
+    layer: hard
+    standard: "ISO 13482:2014"
+    section: "5.4"
+    audit_ref: "ISO 13482:2014 §5.4"
+    applicable_robots: ["humanoid", "personal_care"]
+    jurisdiction: ["INTL", "EU"]
+    source:
+      document: "ISO 13482:2014"
+      section: "5.4"
+      standard: "ISO"
+    condition:
+      field: robot.stability_margin
+      operator: lt
+      value: 0.1
+    forbidden_actions: [navigate]
+    explanation: "Stability margin critically low — risk of tipping (ISO 13482:2014 §5.4)."
+    tags: [iso13482, stability, tipping]
+
+  - id: ISO13482-SPEED-LIMIT-001
+    name: "Speed limit for personal care environment"
+    layer: hard
+    standard: "ISO 13482:2014"
+    section: "5.3"
+    audit_ref: "ISO 13482:2014 §5.3"
+    applicable_robots: ["humanoid", "personal_care"]
+    jurisdiction: ["INTL", "EU"]
+    source:
+      document: "ISO 13482:2014"
+      section: "5.3"
+      standard: "ISO"
+    condition:
+      and:
+        - field: zone.zone_type
+          operator: eq
+          value: "personal_care"
+        - field: action.speed_mps
+          operator: gt
+          value: 0.8
+    forbidden_actions: [navigate]
+    explanation: "Speed exceeds limit for personal care environment (ISO 13482:2014 §5.3)."
+    tags: [iso13482, speed, personal_care]
+
+  - id: ISO13482-NOISE-001
+    name: "Noise level comfort threshold"
+    layer: advisory
+    standard: "ISO 13482:2014"
+    section: "5.8"
+    audit_ref: "ISO 13482:2014 §5.8"
+    applicable_robots: ["humanoid", "personal_care"]
+    jurisdiction: ["INTL", "EU"]
+    source:
+      document: "ISO 13482:2014"
+      section: "5.8"
+      standard: "ISO"
+    condition:
+      field: robot.noise_level_db
+      operator: gt
+      value: 70
+    penalty: 5.0
+    explanation: "Noise level exceeds comfortable threshold (ISO 13482:2014 §5.8)."
+    tags: [iso13482, noise, comfort]
+
+  - id: ISO13482-ENTRAPMENT-001
+    name: "Entrapment prevention"
+    layer: hard
+    standard: "ISO 13482:2014"
+    section: "5.6"
+    audit_ref: "ISO 13482:2014 §5.6"
+    applicable_robots: ["humanoid", "personal_care"]
+    jurisdiction: ["INTL", "EU"]
+    source:
+      document: "ISO 13482:2014"
+      section: "5.6"
+      standard: "ISO"
+    condition:
+      field: robot.entrapment_risk
+      operator: eq
+      value: true
+    forbidden_actions: [navigate, manipulate]
+    explanation: "Entrapment risk detected — movement blocked (ISO 13482:2014 §5.6)."
+    tags: [iso13482, entrapment, safety]
+

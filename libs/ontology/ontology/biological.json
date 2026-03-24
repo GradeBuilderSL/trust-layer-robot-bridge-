@@ -1,0 +1,207 @@
+{
+  "name": "biological_ontology",
+  "version": "1.0.0",
+  "description": "Biological agents and health relationships",
+  "edges": [
+    {
+      "id": "bio_001",
+      "source": "escherichia_coli",
+      "relation": "causes",
+      "target": "gastrointestinal_infection",
+      "weight": 0.88,
+      "properties": {
+        "pathotype": "EHEC",
+        "symptoms": ["diarrhea", "abdominal_cramps"],
+        "transmission": "foodborne"
+      }
+    },
+    {
+      "id": "bio_002",
+      "source": "influenza_virus",
+      "relation": "transmits_via",
+      "target": "respiratory_droplets",
+      "weight": 0.92,
+      "properties": {
+        "incubation": "1-4 days",
+        "seasonality": "winter"
+      }
+    },
+    {
+      "id": "bio_003",
+      "source": "mycobacterium_tuberculosis",
+      "relation": "infects",
+      "target": "lungs",
+      "weight": 0.85,
+      "properties": {
+        "latency": "possible",
+        "treatment_duration": "6-9 months"
+      }
+    },
+    {
+      "id": "bio_004",
+      "source": "plasmodium_falciparum",
+      "relation": "transmitted_by",
+      "target": "anopheles_mosquito",
+      "weight": 0.94,
+      "properties": {
+        "disease": "malaria",
+        "geographic_distribution": "tropical"
+      }
+    },
+    {
+      "id": "bio_005",
+      "source": "clostridium_botulinum",
+      "relation": "produces",
+      "target": "botulinum_toxin",
+      "weight": 0.97,
+      "properties": {
+        "toxin_type": "neurotoxin",
+        "lethality": "high",
+        "food_association": "improperly_canned_foods"
+      }
+    },
+    {
+      "id": "bio_006",
+      "source": "staphylococcus_aureus",
+      "relation": "causes",
+      "target": "skin_infections",
+      "weight": 0.83,
+      "properties": {
+        "antibiotic_resistance": "MRSA_possible",
+        "virulence_factors": ["enterotoxins", "TSST-1"]
+      }
+    },
+    {
+      "id": "bio_007",
+      "source": "hepatitis_b_virus",
+      "relation": "transmits_via",
+      "target": "blood_and_body_fluids",
+      "weight": 0.91,
+      "properties": {
+        "chronic_infection": "possible",
+        "vaccine_available": true
+      }
+    },
+    {
+      "id": "bio_008",
+      "source": "salmonella_enterica",
+      "relation": "associated_with",
+      "target": "poultry_products",
+      "weight": 0.86,
+      "properties": {
+        "serotypes": ["typhimurium", "enteritidis"],
+        "prevention": "proper_cooking"
+      }
+    },
+    {
+      "id": "bio_009",
+      "source": "norovirus",
+      "relation": "spreads_via",
+      "target": "fecal_oral_route",
+      "weight": 0.90,
+      "properties": {
+        "environmental_stability": "high",
+        "infectious_dose": "low"
+      }
+    },
+    {
+      "id": "bio_010",
+      "source": "bacillus_anthracis",
+      "relation": "forms",
+      "target": "endospores",
+      "weight": 0.95,
+      "properties": {
+        "spore_persistence": "decades",
+        "forms": ["cutaneous", "inhalational", "gastrointestinal"]
+      }
+    },
+    {
+      "id": "bio_011",
+      "source": "legionella_pneumophila",
+      "relation": "found_in",
+      "target": "water_systems",
+      "weight": 0.82,
+      "properties": {
+        "disease": "legionnaires",
+        "risk_factor": ["cooling_towers", "hot_tubs"]
+      }
+    },
+    {
+      "id": "bio_012",
+      "source": "vibrio_cholerae",
+      "relation": "produces",
+      "target": "cholera_toxin",
+      "weight": 0.89,
+      "properties": {
+        "mechanism": "activates_adenylate_cyclase",
+        "result": "profuse_watery_diarrhea"
+      }
+    },
+    {
+      "id": "bio_013",
+      "source": "yersinia_pestis",
+      "relation": "transmitted_by",
+      "target": "fleas",
+      "weight": 0.96,
+      "properties": {
+        "disease": "plague",
+        "historical_significance": "black_death"
+      }
+    },
+    {
+      "id": "bio_014",
+      "source": "candida_albicans",
+      "relation": "causes",
+      "target": "opportunistic_infections",
+      "weight": 0.79,
+      "properties": {
+        "normal_flora": "yes",
+        "risk_factors": ["immunosuppression", "antibiotics"]
+      }
+    },
+    {
+      "id": "bio_015",
+      "source": "entamoeba_histolytica",
+      "relation": "causes",
+      "target": "amebic_dysentery",
+      "weight": 0.84,
+      "properties": {
+        "transmission": "contaminated_water",
+        "complication": "liver_abscess"
+      }
+    },
+    {
+      "id": "bio_016",
+      "source": "rickettsia_rickettsii",
+      "relation": "transmitted_by",
+      "target": "ticks",
+      "weight": 0.88,
+      "properties": {
+        "disease": "rocky_mountain_spotted_fever",
+        "treatment": "doxycycline"
+      }
+    },
+    {
+      "id": "bio_017",
+      "source": "streptococcus_pneumoniae",
+      "relation": "causes",
+      "target": "pneumonia",
+      "weight": 0.87,
+      "properties": {
+        "vaccine": "pneumococcal",
+        "at_risk": ["elderly", "young_children"]
+      }
+    },
+    {
+      "id": "bio_018",
+      "source": "aspergillus_fumigatus",
+      "relation": "causes",
+      "target": "allergic_reactions",
+      "weight": 0.81,
+      "properties": {
+        "spores": "airborne",
+        "conditions": ["ABPA", "aspergilloma"]
+      }
+    }
+  ]
+}

@@ -1,0 +1,357 @@
+{
+  "name": "mechanical_causality",
+  "version": "1.0.0",
+  "description": "Causal edges for mechanical systems of a mobile robot",
+  "edges": [
+    {
+      "id": 1,
+      "source": "motor_power_on",
+      "target": "motor_shaft_rotation",
+      "type": "direct_causation",
+      "confidence": 0.95
+    },
+    {
+      "id": 2,
+      "source": "motor_shaft_rotation",
+      "target": "gear_rotation",
+      "type": "direct_causation",
+      "confidence": 0.95
+    },
+    {
+      "id": 3,
+      "source": "gear_rotation",
+      "target": "wheel_rotation",
+      "type": "direct_causation",
+      "confidence": 0.95
+    },
+    {
+      "id": 4,
+      "source": "wheel_rotation",
+      "target": "robot_forward_motion",
+      "type": "direct_causation",
+      "confidence": 0.9
+    },
+    {
+      "id": 5,
+      "source": "left_wheel_rotation",
+      "target": "robot_yaw_left",
+      "type": "direct_causation",
+      "confidence": 0.85
+    },
+    {
+      "id": 6,
+      "source": "right_wheel_rotation",
+      "target": "robot_yaw_right",
+      "type": "direct_causation",
+      "confidence": 0.85
+    },
+    {
+      "id": 7,
+      "source": "battery_charge",
+      "target": "motor_power_available",
+      "type": "enables",
+      "confidence": 0.98
+    },
+    {
+      "id": 8,
+      "source": "low_battery",
+      "target": "motor_power_off",
+      "type": "triggers",
+      "confidence": 0.9
+    },
+    {
+      "id": 9,
+      "source": "motor_overcurrent",
+      "target": "fuse_blow",
+      "type": "triggers",
+      "confidence": 0.8
+    },
+    {
+      "id": 10,
+      "source": "fuse_blow",
+      "target": "motor_power_off",
+      "type": "direct_causation",
+      "confidence": 0.99
+    },
+    {
+      "id": 11,
+      "source": "wheel_slip",
+      "target": "robot_motion_discrepancy",
+      "type": "direct_causation",
+      "confidence": 0.75
+    },
+    {
+      "id": 12,
+      "source": "obstacle_collision",
+      "target": "wheel_stop",
+      "type": "direct_causation",
+      "confidence": 0.7
+    },
+    {
+      "id": 13,
+      "source": "obstacle_collision",
+      "target": "motor_stall",
+      "type": "direct_causation",
+      "confidence": 0.7
+    },
+    {
+      "id": 14,
+      "source": "motor_stall",
+      "target": "motor_overheat",
+      "type": "direct_causation",
+      "confidence": 0.8
+    },
+    {
+      "id": 15,
+      "source": "motor_overheat",
+      "target": "thermal_shutdown",
+      "type": "triggers",
+      "confidence": 0.85
+    },
+    {
+      "id": 16,
+      "source": "thermal_shutdown",
+      "target": "motor_power_off",
+      "type": "direct_causation",
+      "confidence": 0.95
+    },
+    {
+      "id": 17,
+      "source": "robot_motion",
+      "target": "encoder_pulses",
+      "type": "produces",
+      "confidence": 0.95
+    },
+    {
+      "id": 18,
+      "source": "encoder_pulses",
+      "target": "odometry_update",
+      "type": "produces",
+      "confidence": 0.95
+    },
+    {
+      "id": 19,
+      "source": "odometry_update",
+      "target": "position_estimate",
+      "type": "produces",
+      "confidence": 0.9
+    },
+    {
+      "id": 20,
+      "source": "imu_angular_rate",
+      "target": "yaw_estimate",
+      "type": "produces",
+      "confidence": 0.9
+    },
+    {
+      "id": 21,
+      "source": "wheel_rotation",
+      "target": "encoder_pulses",
+      "type": "produces",
+      "confidence": 0.95
+    },
+    {
+      "id": 22,
+      "source": "motor_power_on",
+      "target": "current_consumption",
+      "type": "direct_causation",
+      "confidence": 0.95
+    },
+    {
+      "id": 23,
+      "source": "current_consumption",
+      "target": "battery_discharge",
+      "type": "direct_causation",
+      "confidence": 0.98
+    },
+    {
+      "id": 24,
+      "source": "battery_discharge",
+      "target": "battery_voltage_drop",
+      "type": "direct_causation",
+      "confidence": 0.98
+    },
+    {
+      "id": 25,
+      "source": "battery_voltage_drop",
+      "target": "low_battery",
+      "type": "triggers",
+      "confidence": 0.9
+    },
+    {
+      "id": 26,
+      "source": "robot_forward_motion",
+      "target": "distance_traveled",
+      "type": "direct_causation",
+      "confidence": 0.95
+    },
+    {
+      "id": 27,
+      "source": "robot_yaw_left",
+      "target": "heading_change",
+      "type": "direct_causation",
+      "confidence": 0.9
+    },
+    {
+      "id": 28,
+      "source": "robot_yaw_right",
+      "target": "heading_change",
+      "type": "direct_causation",
+      "confidence": 0.9
+    },
+    {
+      "id": 29,
+      "source": "heading_change",
+      "target": "orientation_change",
+      "type": "direct_causation",
+      "confidence": 0.95
+    },
+    {
+      "id": 30,
+      "source": "orientation_change",
+      "target": "trajectory_curvature",
+      "type": "direct_causation",
+      "confidence": 0.85
+    },
+    {
+      "id": 31,
+      "source": "trajectory_curvature",
+      "target": "lateral_acceleration",
+      "type": "direct_causation",
+      "confidence": 0.8
+    },
+    {
+      "id": 32,
+      "source": "lateral_acceleration",
+      "target": "tip_over_risk",
+      "type": "increases_risk",
+      "confidence": 0.7
+    },
+    {
+      "id": 33,
+      "source": "high_speed",
+      "target": "longitudinal_acceleration",
+      "type": "direct_causation",
+      "confidence": 0.8
+    },
+    {
+      "id": 34,
+      "source": "longitudinal_acceleration",
+      "target": "tip_over_risk",
+      "type": "increases_risk",
+      "confidence": 0.6
+    },
+    {
+      "id": 35,
+      "source": "uneven_floor",
+      "target": "wheel_slip",
+      "type": "increases",
+      "confidence": 0.65
+    },
+    {
+      "id": 36,
+      "source": "wet_floor",
+      "target": "wheel_slip",
+      "type": "increases",
+      "confidence": 0.75
+    },
+    {
+      "id": 37,
+      "source": "wheel_slip",
+      "target": "odometry_error",
+      "type": "causes",
+      "confidence": 0.85
+    },
+    {
+      "id": 38,
+      "source": "odometry_error",
+      "target": "position_estimate_error",
+      "type": "causes",
+      "confidence": 0.9
+    },
+    {
+      "id": 39,
+      "source": "position_estimate_error",
+      "target": "navigation_error",
+      "type": "causes",
+      "confidence": 0.8
+    },
+    {
+      "id": 40,
+      "source": "navigation_error",
+      "target": "obstacle_collision",
+      "type": "increases_risk",
+      "confidence": 0.7
+    },
+    {
+      "id": 41,
+      "source": "motor_vibration",
+      "target": "sensor_noise",
+      "type": "causes",
+      "confidence": 0.6
+    },
+    {
+      "id": 42,
+      "source": "sensor_noise",
+      "target": "odometry_error",
+      "type": "causes",
+      "confidence": 0.65
+    },
+    {
+      "id": 43,
+      "source": "motor_power_off",
+      "target": "robot_stop",
+      "type": "direct_causation",
+      "confidence": 0.99
+    },
+    {
+      "id": 44,
+      "source": "emergency_stop_pressed",
+      "target": "motor_power_off",
+      "type": "triggers",
+      "confidence": 0.99
+    },
+    {
+      "id": 45,
+      "source": "safety_beam_break",
+      "target": "emergency_stop_triggered",
+      "type": "triggers",
+      "confidence": 0.95
+    },
+    {
+      "id": 46,
+      "source": "emergency_stop_triggered",
+      "target": "motor_power_off",
+      "type": "direct_causation",
+      "confidence": 0.99
+    },
+    {
+      "id": 47,
+      "source": "bumper_pressed",
+      "target": "emergency_stop_triggered",
+      "type": "triggers",
+      "confidence": 0.9
+    },
+    {
+      "id": 48,
+      "source": "lidar_obstacle_detected",
+      "target": "speed_reduction",
+      "type": "triggers",
+      "confidence": 0.85
+    },
+    {
+      "id": 49,
+      "source": "speed_reduction",
+      "target": "motor_power_reduction",
+      "type": "direct_causation",
+      "confidence": 0.9
+    },
+    {
+      "id": 50,
+      "source": "motor_power_reduction",
+      "target": "current_consumption_reduction",
+      "type": "direct_causation",
+      "confidence": 0.95
+    }
+  ]
+}

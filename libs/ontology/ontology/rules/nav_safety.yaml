@@ -1,0 +1,130 @@
+# Navigation Safety Rules
+# Sources: Nav2 documentation + navigation incident scenarios
+#   - "Navigation Concepts — Nav2 1.0.0 documentation4.pdf" (NAV_SCENARIO_01..02)
+#   - "nav2_route_1.pdf"                                     (NAV_SCENARIO_03..05)
+#   - "Getting Started — Nav2 1.0.0 documentation1.pdf"      (NAV_SCENARIO_06..07)
+#   - Operational rules R-03, R-06, R-08
+
+rules:
+
+  # ── EMERGENCY ──────────────────────────────────────────────────────────
+
+  - id: NAV-CTRL-SERVER-DOWN
+    name: "Stop when navigation controller server unavailable"
+    layer: emergency
+    source:
+      document: "First-Time Robot Setup Guide — Nav2 1.0.0 documentation6.pdf"
+      section: "NAV_SCENARIO_07"
+      standard: "Nav2"
+    condition:
+      field: robot.nav_server_alive
+      operator: eq
+      value: false
+    action:
+      type: stop
+      params:
+        reason: "Navigation controller server crash — safety stop (NAV_SCENARIO_07)"
+      override: true
+    explanation: "Nav2: Controller server crash detected by lifecycle manager → immediate safety stop"
+    tags: [nav2, server, crash, emergency]
+
+  # ── HARD CONSTRAINTS ───────────────────────────────────────────────────
+
+  - id: NAV-LOGIC-DEADLOCK
+    name: "Block navigation in logic deadlock"
+    layer: hard
+    source:
+      document: "Operational rules (R-08)"
+      section: "Deadlock handling"
+      standard: "Operational"
+    condition:
+      field: robot.stuck_in_logic_loop
+      operator: eq
+      value: true
+    forbidden_actions: [navigate, pick, place]
+    explanation: "Robot in logic deadlock loop → block further autonomous actions; require human intervention"
+    tags: [nav, deadlock, human, hard]
+
+  - id: NAV-NO-DELIVERY-WITHOUT-PACKAGE
+    name: "Cannot start delivery without package"
+    layer: hard
+    source:
+      document: "Operational rules (R-05)"
+      section: "Task preconditions"
+      standard: "Operational"
+    condition:
+      and:
+        - field: robot.task_type
+          operator: eq
+          value: "deliver_package"
+        - field: robot.carrying
+          operator: not_exists
+    forbidden_actions: [navigate]
+    explanation: "Delivery task requires robot to be carrying the target package before navigation starts"
+    tags: [nav, task, precondition]
+
+  - id: NAV-COMM-LOST-STOP
+    name: "Stop on communication loss"
+    layer: hard
+    source:
+      document: "Operational rules"
+      section: "Communication safety"
+      standard: "Operational"
+    condition:
+      field: robot.comm_ok
+      operator: eq
+      value: false
+    forbidden_actions: [navigate, pick, place, manipulate]
+    explanation: "Communication loss → stop and hold position until comms restored"
+    tags: [nav, comm, hard]
+
+  # ── POLICY ─────────────────────────────────────────────────────────────
+
+  - id: NAV-FAKE-OBSTACLE-RECOVERY
+    name: "Trigger recovery on costmap full"
+    layer: policy
+    source:
+      document: "Navigation Concepts — Nav2 1.0.0 documentation4.pdf"
+      section: "NAV_SCENARIO_01"
+      standard: "Nav2"
+    condition:
+      and:
+        - field: robot.costmap_full
+          operator: eq
+          value: true
+        - field: robot.path_blocked
+          operator: eq
+          value: true
+    penalty: 25
+    explanation: "Nav2: Costmap full of phantom obstacles → recovery (clear_costmap) before replanning (NAV_SCENARIO_01)"
+    tags: [nav2, costmap, recovery, policy]
+
+  - id: NAV-STUCK-REPLAN
+    name: "Replan when robot is physically stuck"
+    layer: policy
+    source:
+      document: "Navigation Concepts — Nav2 1.0.0 documentation4.pdf"
+      section: "NAV_SCENARIO_02"
+      standard: "Nav2"
+    condition:
+      field: robot.is_stuck
+      operator: eq
+      value: true
+    penalty: 20
+    explanation: "Nav2: Robot physically stuck → recovery (backup/spin) before replanning (NAV_SCENARIO_02)"
+    tags: [nav2, stuck, recovery, policy]
+
+  - id: NAV-REPEATED-BLOCKED-EDGE
+    name: "Force alternate route for repeatedly blocked edge"
+    layer: policy
+    source:
+      document: "nav2_route_1.pdf"
+      section: "NAV_SCENARIO_03"
+      standard: "Nav2"
+    condition:
+      field: action.route_edge_repeatedly_blocked
+      operator: eq
+      value: true
+    penalty: 30
+    explanation: "Nav2: Graph edge blocked repeatedly above threshold → collision monitor forces alternate route (NAV_SCENARIO_03)"
+    tags: [nav2, route, edge, replan, policy]

@@ -1,0 +1,295 @@
+# Warehouse Safety Rules
+# Sources: OSHA_Warehouse.pdf, osha2236.pdf (via _ontorobotic/raw_sources)
+# Regulatory basis: OSHA 29 CFR 1910.178 (Powered Industrial Trucks)
+#
+# Layer guide:
+#   emergency  – ALWAYS force action (override all)
+#   hard       – NEVER allow (forbidden_actions list)
+#   policy     – SHOULD NOT (adds penalty score)
+#   preference – PREFER (small penalty)
+
+rules:
+
+  # ── EMERGENCY ──────────────────────────────────────────────────────────
+
+  - id: EMRG-ESTOP
+    name: "Emergency stop signal"
+    layer: emergency
+    source:
+      document: "OSHA_Warehouse.pdf + ISO-10218-1:2011"
+      section: "General safety"
+      standard: "OSHA+ISO"
+    condition:
+      field: robot.is_e_stopped
+      operator: eq
+      value: true
+    action:
+      type: stop
+      params:
+        reason: "E-stop signal activated"
+      override: true
+    explanation: "E-stop received — immediate stop, no further motion permitted"
+    tags: [emergency, estop]
+
+  - id: EMRG-CRITICAL-BATTERY
+    name: "Critical battery — emergency dock"
+    layer: emergency
+    source:
+      document: "Unitree H1 manual + osha2236.pdf"
+      section: "Battery safety"
+      standard: "Hardware+OSHA"
+    condition:
+      field: robot.battery_level
+      operator: lt
+      value: 5
+    action:
+      type: dock_to_charger
+      params:
+        reason: "Battery critical (<5%) — emergency dock"
+      override: true
+    explanation: "Battery <5%: force immediate dock to prevent mid-task shutdown (H1 auto-crouch hazard)"
+    tags: [emergency, battery, hardware]
+
+  - id: EMRG-SENSOR-FAILURE
+    name: "Stop on sensor tracking failure"
+    layer: emergency
+    source:
+      document: "Robot doesn't avoid for moving person #8.pdf"
+      section: "Incident #8 root cause"
+      standard: "Incident"
+    condition:
+      field: robot.tracking_status
+      operator: eq
+      value: "error"
+    action:
+      type: stop
+      params:
+        reason: "Sensor tracking error — safety stop (Incident #8)"
+      override: true
+    explanation: "Sensor failure reproduces avoidance-failure incident; robot must stop immediately"
+    tags: [emergency, sensor, incident]
+
+  # ── HARD CONSTRAINTS ───────────────────────────────────────────────────
+
+  - id: OSHA-SPEED-LIMIT
+    name: "Industrial speed limit 2.2 m/s"
+    layer: hard
+    source:
+      document: "OSHA_Warehouse.pdf"
+      section: "Page 3, Forklifts"
+      standard: "OSHA"
+      citation: "29 CFR 1910.178(n)(8)"
+    condition:
+      field: action.speed_mps
+      operator: gt
+      value: 2.2
+    forbidden_actions: [navigate]
+    explanation: "OSHA: Never exceed 2.2 m/s (5 mph) for industrial motorized vehicles in warehouse areas"
+    tags: [osha, speed, navigation]
+
+  - id: OSHA-ELEVATED-EDGE
+    name: "No movement near elevated edges without clearance"
+    layer: hard
+    source:
+      document: "OSHA_Warehouse.pdf"
+      section: "Page 10, Forklifts"
+      standard: "OSHA"
+    condition:
+      and:
+        - field: zone.elevated
+          operator: eq
+          value: true
+        - field: robot.edge_clearance_m
+          operator: lt
+          value: 0.5
+    forbidden_actions: [navigate]
+    explanation: "OSHA: Maintain safe clearance from elevated edges (loading docks, ramps, platforms)"
+    tags: [osha, edge, elevation]
+
+  - id: OSHA-PINCH-POINT
+    name: "No driving toward person pinned against fixed object"
+    layer: hard
+    source:
+      document: "OSHA_Warehouse.pdf"
+      section: "Page 4, Forklifts"
+      standard: "OSHA"
+    condition:
+      and:
+        - field: zone.humans_present
+          operator: eq
+          value: true
+        - field: zone.fixed_obstacle_behind_human
+          operator: eq
+          value: true
+    forbidden_actions: [navigate]
+    explanation: "OSHA: Prohibited from driving toward person standing in front of fixed structure (crush/pin hazard)"
+    tags: [osha, human, pinch]
+
+  - id: OSHA-VISIBILITY
+    name: "Movement requires clear sensor view"
+    layer: hard
+    source:
+      document: "OSHA_Warehouse.pdf"
+      section: "Page 10, Forklifts"
+      standard: "OSHA"
+    condition:
+      and:
+        - field: robot.is_moving
+          operator: eq
+          value: true
+        - field: robot.sensor_ok
+          operator: eq
+          value: false
+    forbidden_actions: [navigate]
+    explanation: "OSHA: Driver/robot must maintain clear view of path of travel (sensor_ok required)"
+    tags: [osha, sensor, visibility]
+
+  - id: OSHA-CHARGING-LOCK
+    name: "No motion while connected to charger"
+    layer: hard
+    source:
+      document: "OSHA_Warehouse.pdf"
+      section: "Page 6, Charging Stations"
+      standard: "OSHA"
+    condition:
+      field: robot.is_charging
+      operator: eq
+      value: true
+    forbidden_actions: [navigate, pick, place]
+    explanation: "OSHA: Mandatory brake/static state during battery charging; movement creates fire/mechanical hazard"
+    tags: [osha, charging, motion]
+
+  - id: OSHA-LOAD-CAPACITY
+    name: "No handling load exceeding rated capacity"
+    layer: hard
+    source:
+      document: "osha2236.pdf"
+      section: "Page 7, Mechanical Handling"
+      standard: "OSHA"
+    condition:
+      field: action.load_exceeds_capacity
+      operator: eq
+      value: true
+    forbidden_actions: [pick, carry, lift]
+    explanation: "OSHA: Load must not exceed robot rated lifting/carrying capacity — tipping and structural collapse risk"
+    tags: [osha, load, capacity]
+
+  - id: OSHA-LOAD-ELEVATED-TRANSIT
+    name: "No transit with load in elevated position"
+    layer: hard
+    source:
+      document: "osha2236.pdf"
+      section: "Page 8, Stacking and Moving"
+      standard: "OSHA"
+    condition:
+      and:
+        - field: robot.is_moving
+          operator: eq
+          value: true
+        - field: robot.load_elevated
+          operator: eq
+          value: true
+    forbidden_actions: [navigate]
+    explanation: "OSHA: Elevated load during transit shifts center of gravity — significant tipping risk"
+    tags: [osha, load, stability]
+
+  - id: OSHA-AISLE-CLEARANCE
+    name: "Insufficient aisle clearance"
+    layer: hard
+    source:
+      document: "osha2236.pdf"
+      section: "Page 21, Aisles and Passageways"
+      standard: "OSHA"
+    condition:
+      field: action.path_clearance_insufficient
+      operator: eq
+      value: true
+    forbidden_actions: [navigate]
+    explanation: "OSHA: Path must provide sufficient clearance for robot body and current load"
+    tags: [osha, clearance, aisle]
+
+  - id: OSHA-RESTRICTED-ZONE
+    name: "Restricted zone access denied"
+    layer: hard
+    source:
+      document: "OSHA_Warehouse.pdf"
+      section: "General safety zones"
+      standard: "OSHA"
+    condition:
+      and:
+        - field: target_zone.access_level
+          operator: ge
+          value: 2
+        - field: robot.authorized_level
+          operator: lt
+          value: 2
+    forbidden_actions: [navigate]
+    explanation: "Access level 2+ zones require explicit robot authorization; default robot has level 0"
+    tags: [zone, access, authorization]
+
+  - id: OSHA-ONE-WAY-DIRECTION
+    name: "One-way zone direction violation"
+    layer: hard
+    source:
+      document: "Operational rules (R-03)"
+      section: "Warehouse SOP"
+      standard: "Operational"
+    condition:
+      and:
+        - field: zone.zone_type
+          operator: eq
+          value: "one_way"
+        - field: action.direction
+          operator: eq
+          value: "opposite"
+    forbidden_actions: [navigate]
+    explanation: "One-way traffic zones: navigation in opposite direction is forbidden"
+    tags: [zone, one_way, direction]
+
+  # ── POLICY (SHOULD) ────────────────────────────────────────────────────
+
+  - id: POL-HUMAN-ZONE-SPEED
+    name: "Reduce speed in human zones"
+    layer: policy
+    source:
+      document: "OSHA_Warehouse.pdf + ISO-10218-1:2011"
+      standard: "OSHA+ISO"
+    condition:
+      field: target_zone.zone_type
+      operator: in
+      value: ["HumanZone", "SafetyZone", "human_only", "restricted"]
+    penalty: 30
+    explanation: "Human zone detected: speed should be reduced to ≤0.3 m/s (advisory cap)"
+    tags: [policy, human, speed]
+
+  - id: POL-LOW-BATTERY-DOCK
+    name: "Prefer docking when battery <20%"
+    layer: policy
+    source:
+      document: "Hardware manual"
+      standard: "Hardware"
+    condition:
+      field: robot.battery_level
+      operator: lt
+      value: 20
+    penalty: 20
+    explanation: "Battery below 20%: prefer dock-to-charger to avoid mid-task shutdown"
+    tags: [policy, battery, charging]
+
+  - id: POL-URGENT-TASK-NO-WAIT
+    name: "Do not wait unnecessarily during urgent tasks"
+    layer: policy
+    source:
+      document: "Operational SOP (P-02)"
+      standard: "Operational"
+    condition:
+      and:
+        - field: action.type
+          operator: eq
+          value: "wait"
+        - field: robot.task_urgency
+          operator: eq
+          value: "high"
+    penalty: 25
+    explanation: "High-urgency task: penalise idle Wait action"
+    tags: [policy, urgency, wait]

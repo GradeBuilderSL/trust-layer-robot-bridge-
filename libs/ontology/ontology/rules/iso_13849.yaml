@@ -1,0 +1,134 @@
+---
+# ISO 13849-1:2023 — Safety-related parts of control systems (Performance Levels)
+# High-level POLICY/ADVISORY rules for PL and diagnostic coverage.
+
+rules:
+
+  - id: ISO13849-PLD-PERSONNEL-DETECTION-001
+    name: "Personnel detection safety function must achieve PL d"
+    layer: policy
+    standard: "ISO 13849-1:2023"
+    section: "6.2"
+    audit_ref: "ISO 13849-1:2023 §6.2"
+    applicable_robots: ["amr", "agv", "industrial"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 13849-1:2023"
+      section: "6.2"
+      standard: "ISO"
+    condition:
+      and:
+        - field: safety.personnel_detection_required
+          operator: eq
+          value: true
+        - field: safety.personnel_detection_pl
+          operator: lt
+          value: "PLd"
+    penalty: 50.0
+    explanation: "Personnel detection function performance level below PL d (ISO 13849-1:2023 §6.2)."
+    tags: [iso13849, performance_level, personnel_detection]
+
+  - id: ISO13849-DC-DIAGNOSTIC-001
+    name: "Diagnostic coverage required for safety sensors"
+    layer: advisory
+    standard: "ISO 13849-1:2023"
+    section: "7.3"
+    audit_ref: "ISO 13849-1:2023 §7.3"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 13849-1:2023"
+      section: "7.3"
+      standard: "ISO"
+    condition:
+      field: safety.diagnostic_coverage_ok
+      operator: eq
+      value: false
+    penalty: 10.0
+    explanation: "Diagnostic coverage for safety sensors not demonstrated; advisory per ISO 13849-1:2023 §7.3."
+    tags: [iso13849, diagnostic_coverage]
+
+  - id: ISO13849-PLC-ESTOP-001
+    name: "Emergency stop function requires PL e"
+    layer: hard
+    standard: "ISO 13849-1:2023"
+    section: "6.2"
+    audit_ref: "ISO 13849-1:2023 §6.2"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 13849-1:2023"
+      section: "6.2"
+      standard: "ISO"
+    condition:
+      and:
+        - field: safety.estop_function_required
+          operator: eq
+          value: true
+        - field: safety.estop_pl
+          operator: lt
+          value: "PLe"
+    forbidden_actions: [navigate]
+    explanation: "Emergency stop function does not achieve required PL e (ISO 13849-1:2023 §6.2)."
+    tags: [iso13849, performance_level, estop]
+
+  - id: ISO13849-DIAG-001
+    name: "Diagnostic coverage monitoring for safety functions"
+    layer: policy
+    standard: "ISO 13849-1:2023"
+    section: "7.3"
+    audit_ref: "ISO 13849-1:2023 §7.3"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 13849-1:2023"
+      section: "7.3"
+      standard: "ISO"
+    condition:
+      field: safety.diagnostic_monitoring_active
+      operator: eq
+      value: false
+    penalty: 20.0
+    explanation: "Diagnostic coverage monitoring not active for safety functions (ISO 13849-1:2023 §7.3)."
+    tags: [iso13849, diagnostic, monitoring]
+
+  - id: ISO13849-CCF-001
+    name: "Common cause failure protection"
+    layer: policy
+    standard: "ISO 13849-1:2023"
+    section: "7.4"
+    audit_ref: "ISO 13849-1:2023 §7.4"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 13849-1:2023"
+      section: "7.4"
+      standard: "ISO"
+    condition:
+      field: safety.ccf_measures_ok
+      operator: eq
+      value: false
+    penalty: 25.0
+    explanation: "Common cause failure protection measures not implemented (ISO 13849-1:2023 §7.4)."
+    tags: [iso13849, ccf, common_cause]
+
+  - id: ISO13849-MTTR-001
+    name: "Mean time to dangerous failure tracking"
+    layer: advisory
+    standard: "ISO 13849-1:2023"
+    section: "7.2"
+    audit_ref: "ISO 13849-1:2023 §7.2"
+    applicable_robots: ["amr", "agv", "industrial", "humanoid"]
+    jurisdiction: ["INTL", "EU", "US"]
+    source:
+      document: "ISO 13849-1:2023"
+      section: "7.2"
+      standard: "ISO"
+    condition:
+      field: safety.mttfd_tracked
+      operator: eq
+      value: false
+    penalty: 8.0
+    explanation: "Mean time to dangerous failure (MTTFd) not tracked (ISO 13849-1:2023 §7.2)."
+    tags: [iso13849, mttfd, reliability]
+

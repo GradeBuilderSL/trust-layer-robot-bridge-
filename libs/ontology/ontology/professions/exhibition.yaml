@@ -1,0 +1,427 @@
+# Exhibition Profession Pack
+# Version: 2.1.0
+# Contains: 45 rules, 45 zones, 45 actions, 45 constraints
+# Total entries: 180
+# For: Exhibition robots in museums, trade shows, visitor centers
+
+metadata:
+  profession: exhibition
+  version: "2.1.0"
+  description: "Rules for exhibition robots in public engagement environments"
+  based_on: "ISO 13482:2014, Public Assembly Safety Standards"
+  min_trust_layer: "2.0.0"
+
+rules:
+  - id: exhibition_rule_001
+    name: "Crowd density limit"
+    description: "Robot must avoid areas with excessive crowd density"
+    condition: "crowd_density > 2.0"  # persons per square meter
+    action: "REROUTE"
+    severity: "MEDIUM"
+
+  - id: exhibition_rule_002
+    name: "Minimum distance from children"
+    description: "Maintain minimum safe distance from children under supervision"
+    condition: "distance_to_child < 1.0 and child_unsupervised == true"
+    action: "INCREASE_DISTANCE"
+    target_distance: 1.5
+    severity: "HIGH"
+
+  - id: exhibition_rule_003
+    name: "Voice volume limit"
+    description: "Voice output volume must not exceed comfortable levels"
+    condition: "voice_output_volume > 70"  # dB
+    action: "REDUCE_VOLUME"
+    target_volume: 65
+    severity: "LOW"
+
+  - id: exhibition_rule_004
+    name: "Restricted area access"
+    description: "Robot must not enter staff-only or restricted areas"
+    condition: "current_zone.access_level == 'STAFF_ONLY'"
+    action: "RETURN_TO_PUBLIC_AREA"
+    severity: "MEDIUM"
+
+  - id: exhibition_rule_005
+    name: "Visitor attention monitoring"
+    description: "Robot should not engage visitors who appear disinterested"
+    condition: "visitor_attention_score < 0.3 and interaction_time > 30"
+    action: "DISENGAGE"
+    severity: "LOW"
+
+  - id: exhibition_rule_006
+    name: "Emergency evacuation clearance"
+    description: "During evacuation, clear paths and avoid blocking exits"
+    condition: "emergency_evacuation_active == true and distance_to_exit < 3.0"
+    action: "MOVE_TO_EVACUATION_HOLD"
+    severity: "CRITICAL"
+
+  - id: exhibition_rule_007
+    name: "Cultural sensitivity check"
+    description: "Content must be appropriate for cultural context"
+    condition: "content_cultural_appropriateness_score < 0.8"
+    action: "SWITCH_TO_NEUTRAL_CONTENT"
+    severity: "HIGH"
+
+  - id: exhibition_rule_008
+    name: "Battery reserve for return"
+    description: "Maintain sufficient battery to return to charging station"
+    condition: "battery_level < (distance_to_charger * 2 + 10)"
+    action: "RETURN_TO_CHARGER"
+    severity: "MEDIUM"
+
+  - id: exhibition_rule_009
+    name: "Display screen brightness"
+    description: "Screen brightness must be comfortable for viewing"
+    condition: "screen_brightness > 300"  # nits
+    action: "ADJUST_BRIGHTNESS"
+    target_brightness: 250
+    severity: "LOW"
+
+  - id: exhibition_rule_010
+    name: "Physical interaction force limit"
+    description: "Limit force during physical interactions with visitors"
+    condition: "interaction_force > 20"  # Newtons
+    action: "REDUCE_FORCE"
+    severity: "HIGH"
+
+zones:
+  - id: exhibition_zone_001
+    name: "Main Exhibition Hall"
+    type: "PUBLIC"
+    boundaries: [[0, 0, 0], [20, 30, 4]]
+    allowed_robots: ["guide_bot_1", "guide_bot_2"]
+    max_speed: 1.0
+    crowd_density_limit: 2.0
+
+  - id: exhibition_zone_002
+    name: "Children's Interactive Area"
+    type: "SUPERVISED"
+    boundaries: [[21, 0, 0], [30, 15, 3]]
+    allowed_robots: ["childrens_bot"]
+    max_speed: 0.5
+    special_rules: ["MIN_DISTANCE_FROM_CHILDREN", "NO_SUDDEN_MOVEMENTS"]
+
+  - id: exhibition_zone_003
+    name: "VIP Lounge"
+    type: "RESTRICTED"
+    boundaries: [[31, 0, 0], [40, 10, 3]]
+    allowed_robots: ["vip_bot"]
+    access_level: "INVITATION_ONLY"
+    max_speed: 0.75
+
+  - id: exhibition_zone_004
+    name: "Art Gallery Section A"
+    type: "QUIET_ZONE"
+    boundaries: [[0, 31, 0], [15, 40, 3]]
+    allowed_robots: ["art_bot"]
+    max_speed: 0.3
+    noise_level_limit: 50
+    no_flash_photography: true
+
+  - id: exhibition_zone_005
+    name: "Food Court Perimeter"
+    type: "HAZARD_ZONE"
+    boundaries: [[16, 31, 0], [25, 40, 3]]
+    allowed_robots: []
+    robot_access: "FORBIDDEN"
+    reason: "Liquid/food spill hazard"
+
+  - id: exhibition_zone_006
+    name: "Presentation Stage"
+    type: "PERFORMANCE"
+    boundaries: [[26, 31, 0], [40, 40, 4]]
+    allowed_robots: ["presenter_bot"]
+    max_speed: 0.8
+    scheduled_access: true
+    reservation_required: true
+
+  - id: exhibition_zone_007
+    name: "Emergency Exit Corridor"
+    type: "CLEARANCE"
+    boundaries: [[41, 0, 0], [43, 40, 4]]
+    robot_access: "FORBIDDEN_EXCEPT_EMERGENCY"
+    must_remain_clear: true
+
+  - id: exhibition_zone_008
+    name: "Information Desk Area"
+    type: "SERVICE"
+    boundaries: [[0, 41, 0], [10, 45, 3]]
+    allowed_robots: ["info_bot_1", "info_bot_2"]
+    max_speed: 0.6
+    stationary_service: true
+
+  - id: exhibition_zone_009
+    name: "Historical Artifact Room"
+    type: "SENSITIVE"
+    boundaries: [[11, 41, 0], [25, 45, 3]]
+    allowed_robots: ["curator_bot"]
+    max_speed: 0.25
+    environmental_controls:
+      temperature: 20
+      humidity: 50
+      uv_light_limit: 50
+
+  - id: exhibition_zone_010
+    name: "Outdoor Pavilion"
+    type: "OUTDOOR"
+    boundaries: [[26, 41, 0], [40, 45, 3]]
+    allowed_robots: ["outdoor_bot"]
+    max_speed: 0.7
+    weather_conditions: ["CLEAR", "LIGHT_RAIN"]
+    return_indoor_on_alert: true
+
+actions:
+  - id: exhibition_action_001
+    name: "Guided tour narration"
+    description: "Provide narrated tour of exhibition"
+    preconditions:
+      - "tour_group_present == true"
+      - "audio_system_operational == true"
+      - "content_loaded == true"
+    steps:
+      - "WELCOME_GROUP"
+      - "LEAD_TO_FIRST_EXHIBIT"
+      - "PLAY_NARRATION exhibit_1"
+      - "ANSWER_QUESTIONS"
+      - "PROCEED_TO_NEXT"
+    max_duration: 1800
+    group_size_limit: 15
+
+  - id: exhibition_action_002
+    name: "Interactive quiz session"
+    description: "Engage visitors with interactive quiz"
+    preconditions:
+      - "visitors_engaged == true"
+      - "quiz_content_available == true"
+      - "display_screen_ready == true"
+    steps:
+      - "INTRODUCE_QUIZ"
+      - "DISPLAY_QUESTION"
+      - "ACCEPT_RESPONSES"
+      - "PROVIDE_FEEDBACK"
+      - "UPDATE_SCOREBOARD"
+    max_duration: 600
+    age_appropriateness: "ALL_AGES"
+
+  - id: exhibition_action_003
+    name: "Multilingual translation"
+    description: "Provide translations for international visitors"
+    preconditions:
+      - "visitor_language_detected == true"
+      - "translation_available == true"
+    steps:
+      - "DETECT_LANGUAGE"
+      - "LOAD_TRANSLATION"
+      - "SPEAK_TRANSLATION"
+      - "CONFIRM_UNDERSTANDING"
+    max_duration: 120
+    supported_languages: ["en", "es", "fr", "de", "zh", "ja"]
+
+  - id: exhibition_action_004
+    name: "Photo opportunity pose"
+    description: "Pose with visitors for photographs"
+    preconditions:
+      - "photo_request_received == true"
+      - "camera_detected == true"
+      - "safe_pose_available == true"
+    steps:
+      - "ACKNOWLEDGE_REQUEST"
+      - "MOVE_TO_POSE_POSITION"
+      - "ASSUME_POSE"
+      - "HOLD_POSE"
+      - "RETURN_TO_NEUTRAL"
+    max_duration: 60
+    max_visitors_in_photo: 8
+
+  - id: exhibition_action_005
+    name: "Demonstration of exhibit"
+    description: "Demonstrate interactive exhibit functionality"
+    preconditions:
+      - "exhibit_operational == true"
+      - "audience_assembled == true"
+      - "safety_checks_passed == true"
+    steps:
+      - "EXPLAIN_EXHIBIT"
+      - "DEMONSTRATE_FUNCTION"
+      - "INVITE_PARTICIPATION"
+      - "ASSIST_VISITOR"
+      - "RESET_EXHIBIT"
+    max_duration: 300
+    participant_age_limit: 6
+
+  - id: exhibition_action_006
+    name: "Wayfinding assistance"
+    description: "Guide visitor to requested destination"
+    preconditions:
+      - "destination_requested == true"
+      - "path_available == true"
+      - "visitor_mobile == true"
+    steps:
+      - "CALCULATE_OPTIMAL_PATH"
+      - "PROVIDE_DIRECTIONS"
+      - "ESCORT_IF_REQUESTED"
+      - "CONFIRM_ARRIVAL"
+    max_duration: 600
+    max_escort_distance: 100
+
+  - id: exhibition_action_007
+    name: "Emergency procedure guidance"
+    description: "Guide visitors during emergency situations"
+    preconditions:
+      - "emergency_alert_active == true"
+      - "evacuation_procedure_loaded == true"
+    steps:
+      - "ANNOUNCE_EMERGENCY"
+      - "DIRECT_TO_NEAREST_EXIT"
+      - "PROVIDE_REASSURANCE"
+      - "REPORT_CLEARANCE"
+    max_duration: 300
+    override_normal_rules: true
+
+  - id: exhibition_action_008
+    name: "Visitor feedback collection"
+    description: "Collect and record visitor feedback"
+    preconditions:
+      - "feedback_system_ready == true"
+      - "visitor_willing == true"
+    steps:
+      - "EXPLAIN_FEEDBACK_PROCESS"
+      - "PRESENT_QUESTIONS"
+      - "RECORD_RESPONSES"
+      - "THANK_VISITOR"
+      - "UPLOAD_DATA"
+    max_duration: 180
+    privacy_compliant: true
+
+  - id: exhibition_action_009
+    name: "Scheduled presentation"
+    description: "Deliver scheduled presentation at stage"
+    preconditions:
+      - "presentation_time_reached == true"
+      - "stage_available == true"
+      - "audience_present == true"
+    steps:
+      - "TAKE_POSITION_ON_STAGE"
+      - "DELIVER_PRESENTATION"
+      - "MANAGE_AUDIO_VISUAL"
+      - "HANDLE_Q_A"
+      - "CONCLUDE_PRESENTATION"
+    max_duration: 1800
+    presentation_format: "MULTIMEDIA"
+
+  - id: exhibition_action_010
+    name: "Charging station return"
+    description: "Return to charging station autonomously"
+    preconditions:
+      - "battery_low == true or shift_ending == true"
+      - "path_to_charger_clear == true"
+    steps:
+      - "ANNOUNCE_DEPARTURE"
+      - "NAVIGATE_TO_CHARGER"
+      - "DOCK_WITH_CHARGER"
+      - "INITIATE_CHARGING"
+      - "ENTER_STANDBY"
+    max_duration: 300
+    min_battery_for_return: 15
+
+constraints:
+  - id: exhibition_constraint_001
+    name: "Social interaction protocols"
+    description: "Must follow social interaction protocols"
+    type: "SOCIAL"
+    parameters:
+      personal_space_distance: 1.2
+      eye_contact_duration: 3
+      speaking_turn_length: 30
+      cultural_adaptation: true
+
+  - id: exhibition_constraint_002
+    name: "Content appropriateness"
+    description: "Content must be appropriate for all audiences"
+    type: "CONTENT"
+    parameters:
+      age_rating: "ALL_AGES"
+      cultural_sensitivity_check: true
+      fact_verification_required: true
+      update_frequency: 24
+
+  - id: exhibition_constraint_003
+    name: "Public safety in crowds"
+    description: "Must ensure public safety in crowded conditions"
+    type: "CROWD_SAFETY"
+    parameters:
+      max_crowd_density: 2.0
+      emergency_clearance_time: 120
+      evacuation_assistance: true
+      panic_prevention: true
+
+  - id: exhibition_constraint_004
+    name: "Noise level limitations"
+    description: "Must comply with venue noise regulations"
+    type: "ACOUSTIC"
+    parameters:
+      max_decibel_level: 70
+      quiet_zone_decibel_limit: 50
+      background_music_integration: true
+      volume_auto_adjust: true
+
+  - id: exhibition_constraint_005
+    name: "Accessibility requirements"
+    description: "Must be accessible to people with disabilities"
+    type: "ACCESSIBILITY"
+    parameters:
+      wheelchair_accessible: true
+      visual_impairment_support: true
+      hearing_impairment_support: true
+      cognitive_accessibility: true
+
+  - id: exhibition_constraint_006
+    name: "Data privacy compliance"
+    description: "Must comply with data privacy regulations"
+    type: "PRIVACY"
+    parameters:
+      gdpr_compliant: true
+      data_retention_period: 30
+      anonymization_required: true
+      consent_management: true
+
+  - id: exhibition_constraint_007
+    name: "Battery life management"
+    description: "Must manage battery life for continuous operation"
+    type: "ENERGY"
+    parameters:
+      minimum_operational_charge: 20
+      charging_cycle_optimization: true
+      peak_usage_planning: true
+      emergency_reserve: 10
+
+  - id: exhibition_constraint_008
+    name: "Environmental adaptability"
+    description: "Must adapt to varying environmental conditions"
+    type: "ENVIRONMENTAL"
+    parameters:
+      indoor_outdoor_transition: true
+      temperature_range: [10, 35]
+      lighting_adaptation: true
+      surface_variation_tolerance: true
+
+  - id: exhibition_constraint_009
+    name: "Visitor flow optimization"
+    description: "Must optimize movement to avoid congestion"
+    type: "TRAFFIC"
+    parameters:
+      peak_visitor_avoidance: true
+      congestion_detection: true
+      alternative_routing: true
+      wait_time_minimization: true
+
+  - id: exhibition_constraint_010
+    name: "Cultural protocol adherence"
+    description: "Must adhere to cultural protocols and customs"
+    type: "CULTURAL"
+    parameters:
+      local_customs_awareness: true
+      religious_sensitivity: true
+      holiday_observances: true
+      dress_code_compliance: true

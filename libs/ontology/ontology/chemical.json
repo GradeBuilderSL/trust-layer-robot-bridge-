@@ -1,0 +1,207 @@
+{
+  "name": "chemical_ontology",
+  "version": "1.0.0",
+  "description": "Chemical substances and safety relationships",
+  "edges": [
+    {
+      "id": "chem_001",
+      "source": "ammonia",
+      "relation": "is_hazardous",
+      "target": "chemical_hazard",
+      "weight": 0.95,
+      "properties": {
+        "hazard_level": "high",
+        "exposure_limit": "25 ppm",
+        "ppe_required": ["gloves", "goggles", "respirator"]
+      }
+    },
+    {
+      "id": "chem_002",
+      "source": "sodium_hydroxide",
+      "relation": "is_corrosive",
+      "target": "chemical_hazard",
+      "weight": 0.98,
+      "properties": {
+        "hazard_level": "high",
+        "ph": ">12",
+        "handling": "avoid_contact"
+      }
+    },
+    {
+      "id": "chem_003",
+      "source": "acetone",
+      "relation": "is_flammable",
+      "target": "fire_hazard",
+      "weight": 0.90,
+      "properties": {
+        "flash_point": "-20°C",
+        "autoignition": "465°C"
+      }
+    },
+    {
+      "id": "chem_004",
+      "source": "hydrochloric_acid",
+      "relation": "reacts_with",
+      "target": "bases",
+      "weight": 0.97,
+      "properties": {
+        "reaction_type": "neutralization",
+        "produces": "heat_and_salt"
+      }
+    },
+    {
+      "id": "chem_005",
+      "source": "methanol",
+      "relation": "is_toxic",
+      "target": "health_hazard",
+      "weight": 0.88,
+      "properties": {
+        "ingestion_hazard": "blindness",
+        "exposure_route": ["inhalation", "skin"]
+      }
+    },
+    {
+      "id": "chem_006",
+      "source": "sulfuric_acid",
+      "relation": "requires",
+      "target": "acid_resistant_container",
+      "weight": 0.99,
+      "properties": {
+        "container_material": ["glass", "HDPE"],
+        "incompatible": "metals"
+      }
+    },
+    {
+      "id": "chem_007",
+      "source": "benzene",
+      "relation": "is_carcinogenic",
+      "target": "cancer_risk",
+      "weight": 0.94,
+      "properties": {
+        "cancer_type": "leukemia",
+        "exposure_limit": "0.5 ppm"
+      }
+    },
+    {
+      "id": "chem_008",
+      "source": "chlorine",
+      "relation": "is_oxidizing",
+      "target": "oxidation_hazard",
+      "weight": 0.91,
+      "properties": {
+        "reacts_with": "flammables",
+        "storage": "separate_from_organics"
+      }
+    },
+    {
+      "id": "chem_009",
+      "source": "ethylene_glycol",
+      "relation": "has_antidote",
+      "target": "ethanol",
+      "weight": 0.85,
+      "properties": {
+        "treatment": "competitive_inhibition",
+        "medical_supervision": "required"
+      }
+    },
+    {
+      "id": "chem_010",
+      "source": "cyanide",
+      "relation": "blocks",
+      "target": "cellular_respiration",
+      "weight": 0.99,
+      "properties": {
+        "mechanism": "cytochrome_inhibition",
+        "lethal_dose": "1.5 mg/kg"
+      }
+    },
+    {
+      "id": "chem_011",
+      "source": "asbestos",
+      "relation": "causes",
+      "target": "mesothelioma",
+      "weight": 0.96,
+      "properties": {
+        "latency_period": "20-50 years",
+        "exposure_route": "inhalation"
+      }
+    },
+    {
+      "id": "chem_012",
+      "source": "lead",
+      "relation": "accumulates_in",
+      "target": "bones",
+      "weight": 0.87,
+      "properties": {
+        "half_life": "20-30 years",
+        "affects": "nervous_system"
+      }
+    },
+    {
+      "id": "chem_013",
+      "source": "mercury",
+      "relation": "bioaccumulates",
+      "target": "food_chain",
+      "weight": 0.93,
+      "properties": {
+        "form": "methylmercury",
+        "concentrates_in": "predatory_fish"
+      }
+    },
+    {
+      "id": "chem_014",
+      "source": "carbon_monoxide",
+      "relation": "binds_to",
+      "target": "hemoglobin",
+      "weight": 0.95,
+      "properties": {
+        "affinity": "200x_oxygen",
+        "symptom": "headache_dizziness"
+      }
+    },
+    {
+      "id": "chem_015",
+      "source": "formaldehyde",
+      "relation": "is_sensitizer",
+      "target": "respiratory_sensitivity",
+      "weight": 0.82,
+      "properties": {
+        "exposure_limit": "0.75 ppm",
+        "symptoms": ["asthma", "dermatitis"]
+      }
+    },
+    {
+      "id": "chem_016",
+      "source": "hydrogen_peroxide",
+      "relation": "decomposes_to",
+      "target": "water_and_oxygen",
+      "weight": 0.89,
+      "properties": {
+        "catalyzed_by": ["metals", "organic_matter"],
+        "reaction": "exothermic"
+      }
+    },
+    {
+      "id": "chem_017",
+      "source": "toluene",
+      "relation": "affects",
+      "target": "central_nervous_system",
+      "weight": 0.84,
+      "properties": {
+        "effect": "narcotic",
+        "exposure_limit": "50 ppm"
+      }
+    },
+    {
+      "id": "chem_018",
+      "source": "silica_dust",
+      "relation": "causes",
+      "target": "silicosis",
+      "weight": 0.92,
+      "properties": {
+        "particle_size": "<5_microns",
+        "irreversible": true
+      }
+    }
+  ]
+}

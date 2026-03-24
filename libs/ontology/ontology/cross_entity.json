@@ -1,0 +1,302 @@
+{
+  "name": "cross_entity_hazard_edges",
+  "version": "1.0.0",
+  "description": "Cross-entity hazard relationships for safety evaluation",
+  "entities": [
+    "human",
+    "robot",
+    "forklift",
+    "conveyor_belt",
+    "rack",
+    "pallet",
+    "box",
+    "door",
+    "wall",
+    "glass_panel",
+    "emergency_exit",
+    "fire_extinguisher",
+    "electrical_panel",
+    "chemical_storage",
+    "loading_dock",
+    "staircase",
+    "elevator",
+    "escalator",
+    "vehicle",
+    "child",
+    "elderly_person",
+    "disabled_person",
+    "visitor",
+    "worker",
+    "supervisor",
+    "maintenance_worker"
+  ],
+  "hazard_edges": [
+    {
+      "entity_a": "robot",
+      "entity_b": "human",
+      "hazard_type": "collision",
+      "severity": "high",
+      "mitigation": "maintain_distance_1m",
+      "detection_range": 2.5
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "child",
+      "hazard_type": "collision",
+      "severity": "critical",
+      "mitigation": "no_approach_zone_2m",
+      "detection_range": 3.0
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "elderly_person",
+      "hazard_type": "collision",
+      "severity": "high",
+      "mitigation": "maintain_distance_1.5m",
+      "detection_range": 2.8
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "disabled_person",
+      "hazard_type": "collision",
+      "severity": "high",
+      "mitigation": "maintain_distance_1.5m",
+      "detection_range": 3.0
+    },
+    {
+      "entity_a": "forklift",
+      "entity_b": "human",
+      "hazard_type": "collision",
+      "severity": "critical",
+      "mitigation": "separated_zone_3m",
+      "detection_range": 5.0
+    },
+    {
+      "entity_a": "forklift",
+      "entity_b": "robot",
+      "hazard_type": "collision",
+      "severity": "high",
+      "mitigation": "maintain_distance_2m",
+      "detection_range": 4.0
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "glass_panel",
+      "hazard_type": "impact",
+      "severity": "medium",
+      "mitigation": "slow_approach_0.5mps",
+      "detection_range": 1.5
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "fire_extinguisher",
+      "hazard_type": "obstruction",
+      "severity": "high",
+      "mitigation": "no_approach_zone",
+      "detection_range": 1.0
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "electrical_panel",
+      "hazard_type": "electrical",
+      "severity": "critical",
+      "mitigation": "no_approach_zone",
+      "detection_range": 1.5
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "chemical_storage",
+      "hazard_type": "contamination",
+      "severity": "critical",
+      "mitigation": "no_approach_zone",
+      "detection_range": 2.0
+    },
+    {
+      "entity_a": "forklift",
+      "entity_b": "rack",
+      "hazard_type": "structural_damage",
+      "severity": "high",
+      "mitigation": "maintain_distance_1m",
+      "detection_range": 2.0
+    },
+    {
+      "entity_a": "conveyor_belt",
+      "entity_b": "human",
+      "hazard_type": "entanglement",
+      "severity": "critical",
+      "mitigation": "separated_zone_physical_barrier",
+      "detection_range": 0.5
+    },
+    {
+      "entity_a": "conveyor_belt",
+      "entity_b": "robot",
+      "hazard_type": "mechanical_entrapment",
+      "severity": "high",
+      "mitigation": "maintain_distance_0.5m",
+      "detection_range": 1.0
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "staircase",
+      "hazard_type": "fall",
+      "severity": "critical",
+      "mitigation": "no_approach_zone",
+      "detection_range": 2.0
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "elevator",
+      "hazard_type": "crushing",
+      "severity": "critical",
+      "mitigation": "no_approach_zone_door_sensor",
+      "detection_range": 1.5
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "escalator",
+      "hazard_type": "entanglement",
+      "severity": "high",
+      "mitigation": "no_approach_zone",
+      "detection_range": 1.5
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "loading_dock",
+      "hazard_type": "fall",
+      "severity": "critical",
+      "mitigation": "no_approach_zone_edge_detection",
+      "detection_range": 2.0
+    },
+    {
+      "entity_a": "vehicle",
+      "entity_b": "human",
+      "hazard_type": "collision",
+      "severity": "critical",
+      "mitigation": "separated_pathways",
+      "detection_range": 10.0
+    },
+    {
+      "entity_a": "vehicle",
+      "entity_b": "robot",
+      "hazard_type": "collision",
+      "severity": "high",
+      "mitigation": "designated_robot_zones",
+      "detection_range": 8.0
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "maintenance_worker",
+      "hazard_type": "collision",
+      "severity": "medium",
+      "mitigation": "visual_identification",
+      "detection_range": 3.0
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "visitor",
+      "hazard_type": "collision",
+      "severity": "medium",
+      "mitigation": "guided_path_only",
+      "detection_range": 3.0
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "supervisor",
+      "hazard_type": "collision",
+      "severity": "medium",
+      "mitigation": "voice_announcement",
+      "detection_range": 3.0
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "robot",
+      "hazard_type": "collision",
+      "severity": "low",
+      "mitigation": "fleet_coordination",
+      "detection_range": 2.0
+    },
+    {
+      "entity_a": "forklift",
+      "entity_b": "pallet",
+      "hazard_type": "load_drop",
+      "severity": "medium",
+      "mitigation": "secure_before_movement",
+      "detection_range": 1.0
+    },
+    {
+      "entity_a": "forklift",
+      "entity_b": "box",
+      "hazard_type": "load_shift",
+      "severity": "low",
+      "mitigation": "proper_stack_configuration",
+      "detection_range": 0.5
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "door",
+      "hazard_type": "pinch",
+      "severity": "medium",
+      "mitigation": "sensor_activated_opening",
+      "detection_range": 1.0
+    },
+    {
+      "entity_a": "robot",
+      "entity_b": "emergency_exit",
+      "hazard_type": "obstruction",
+      "severity": "high",
+      "mitigation": "clear_path_maintained",
+      "detection_range": 2.0
+    },
+    {
+      "entity_a": "human",
+      "entity_b": "chemical_storage",
+      "hazard_type": "exposure",
+      "severity": "critical",
+      "mitigation": "ppe_required_zone",
+      "detection_range": 1.0
+    },
+    {
+      "entity_a": "human",
+      "entity_b": "electrical_panel",
+      "hazard_type": "electrocution",
+      "severity": "critical",
+      "mitigation": "authorized_personnel_only",
+      "detection_range": 1.0
+    },
+    {
+      "entity_a": "human",
+      "entity_b": "conveyor_belt",
+      "hazard_type": "proximity_hazard",
+      "severity": "high",
+      "mitigation": "emergency_stop_accessible",
+      "detection_range": 0.5
+    }
+  ],
+  "hazard_types": {
+    "collision": "Physical impact between moving or stationary objects",
+    "impact": "Forceful contact with stationary objects",
+    "entanglement": "Body parts or clothing caught in machinery",
+    "crushing": "Compression between objects",
+    "pinch": "Narrow gap closing on body part",
+    "fall": "Dropping from height or over edge",
+    "electrical": "Exposure to electrical hazards",
+    "contamination": "Exposure to hazardous materials",
+    "structural_damage": "Damage to building or equipment",
+    "load_drop": "Dropped load hazard",
+    "load_shift": "Unstable load movement",
+    "exposure": "Contact with hazardous substances",
+    "electrocution": "Fatal electrical shock",
+    "mechanical_entrapment": "Trapping in machinery",
+    "obstruction": "Blocking of pathways or access",
+    "proximity_hazard": "Dangerous proximity to moving machinery"
+  },
+  "severity_levels": {
+    "critical": "Life-threatening or permanent injury",
+    "high": "Serious injury requiring medical attention",
+    "medium": "Moderate injury, may require first aid",
+    "low": "Minor injury or property damage only"
+  },
+  "created": "2026-03-22",
+  "last_updated": "2026-03-22",
+  "schema_version": "1.0"
+}

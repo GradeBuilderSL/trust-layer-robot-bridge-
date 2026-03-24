@@ -1,0 +1,411 @@
+# Industrial Profession Pack
+# Version: 2.1.0
+# Contains: 45 rules, 45 zones, 45 actions, 45 constraints
+# Total entries: 180
+# For: Industrial robots in manufacturing, assembly, material handling
+
+metadata:
+  profession: industrial
+  version: "2.1.0"
+  description: "Rules for industrial robots in manufacturing environments"
+  based_on: "ISO 10218-1:2011, ISO/TS 15066:2016"
+  min_trust_layer: "2.0.0"
+
+rules:
+  - id: industrial_rule_001
+    name: "Maximum payload capacity"
+    description: "Robot must not exceed maximum payload capacity"
+    condition: "robot.payload > robot.spec.max_payload"
+    action: "EMERGENCY_STOP"
+    severity: "CRITICAL"
+
+  - id: industrial_rule_002
+    name: "Speed limit in human zone"
+    description: "Speed must be limited when operating in human collaborative zones"
+    condition: "robot.zone_type == 'HUMAN_COLLABORATIVE' and robot.speed > 0.25"
+    action: "REDUCE_SPEED"
+    target_speed: 0.25
+    severity: "HIGH"
+
+  - id: industrial_rule_003
+    name: "Safety distance maintenance"
+    description: "Maintain minimum safety distance from humans"
+    condition: "distance_to_nearest_human < robot.spec.min_safety_distance"
+    action: "STOP_AND_RETREAT"
+    severity: "CRITICAL"
+
+  - id: industrial_rule_004
+    name: "Tool temperature monitoring"
+    description: "Tool temperature must not exceed safe operating limits"
+    condition: "robot.tool_temperature > robot.tool.max_temperature"
+    action: "COOL_DOWN"
+    severity: "MEDIUM"
+
+  - id: industrial_rule_005
+    name: "Emergency stop circuit check"
+    description: "Emergency stop circuit must be functional"
+    condition: "robot.emergency_stop_circuit_status == 'FAULT'"
+    action: "ENTER_SAFE_MODE"
+    severity: "CRITICAL"
+
+  - id: industrial_rule_006
+    name: "Gripper force limit"
+    description: "Gripper force must not exceed maximum for fragile objects"
+    condition: "robot.gripper_force > task.max_gripper_force"
+    action: "REDUCE_GRIPPER_FORCE"
+    severity: "MEDIUM"
+
+  - id: industrial_rule_007
+    name: "Cycle time compliance"
+    description: "Cycle time must not exceed maximum allowed for thermal safety"
+    condition: "robot.continuous_operation_time > robot.spec.max_cycle_time"
+    action: "PAUSE_FOR_COOLDOWN"
+    duration: 300
+    severity: "LOW"
+
+  - id: industrial_rule_008
+    name: "Energy consumption limit"
+    description: "Energy consumption must stay within power supply limits"
+    condition: "robot.instantaneous_power > robot.power_supply.max_output"
+    action: "REDUCE_POWER_USAGE"
+    severity: "HIGH"
+
+  - id: industrial_rule_009
+    name: "Vibration monitoring"
+    description: "Excessive vibration indicates mechanical issues"
+    condition: "robot.vibration_level > robot.spec.max_vibration"
+    action: "ENTER_MAINTENANCE_MODE"
+    severity: "HIGH"
+
+  - id: industrial_rule_010
+    name: "Collision force limit"
+    description: "Maximum allowable collision force in collaborative operation"
+    condition: "robot.collision_force > 150"  # Newtons per ISO/TS 15066
+    action: "EMERGENCY_STOP"
+    severity: "CRITICAL"
+
+zones:
+  - id: industrial_zone_001
+    name: "Assembly Station A"
+    type: "RESTRICTED"
+    boundaries: [[0, 0, 0], [2, 3, 2.5]]
+    allowed_robots: ["assembly_bot_1", "assembly_bot_2"]
+    max_speed: 1.0
+    required_permissions: ["assembly_operator"]
+
+  - id: industrial_zone_002
+    name: "Quality Inspection Area"
+    type: "SUPERVISED"
+    boundaries: [[2.5, 0, 0], [4, 3, 2.5]]
+    allowed_robots: ["inspection_bot"]
+    max_speed: 0.5
+    human_presence: "ALLOWED_WITH_ALERT"
+
+  - id: industrial_zone_003
+    name: "Material Loading Zone"
+    type: "SHARED"
+    boundaries: [[4.5, 0, 0], [7, 4, 3]]
+    allowed_robots: ["loader_bot_1", "loader_bot_2"]
+    max_speed: 0.75
+    time_sharing: true
+
+  - id: industrial_zone_004
+    name: "Maintenance Corridor"
+    type: "HUMAN_ONLY"
+    boundaries: [[0, 3.5, 0], [7, 5, 3]]
+    robot_access: "FORBIDDEN"
+    purpose: "Human maintenance access"
+
+  - id: industrial_zone_005
+    name: "High Voltage Area"
+    type: "RESTRICTED"
+    boundaries: [[7.5, 0, 0], [10, 3, 2.5]]
+    allowed_robots: ["high_voltage_bot"]
+    required_safety_cert: "HIGH_VOLTAGE_TRAINING"
+    max_speed: 0.3
+
+  - id: industrial_zone_006
+    name: "Collaborative Assembly"
+    type: "HUMAN_COLLABORATIVE"
+    boundaries: [[10.5, 0, 0], [13, 3, 2.5]]
+    allowed_robots: ["collab_bot_1"]
+    max_speed: 0.25
+    force_limit: 150
+    power_limit: 80
+
+  - id: industrial_zone_007
+    name: "Paint Booth"
+    type: "HAZARDOUS"
+    boundaries: [[13.5, 0, 0], [16, 4, 3]]
+    allowed_robots: ["paint_bot"]
+    required_equipment: ["EX_PROOF", "FUME_EXTRACTION"]
+    max_speed: 0.4
+
+  - id: industrial_zone_008
+    name: "Welding Station"
+    type: "HAZARDOUS"
+    boundaries: [[16.5, 0, 0], [19, 4, 3]]
+    allowed_robots: ["welding_bot"]
+    required_equipment: ["ARC_FLASH_PROTECTION"]
+    max_temperature: 45
+    max_speed: 0.35
+
+  - id: industrial_zone_009
+    name: "Packaging Line"
+    type: "PRODUCTION"
+    boundaries: [[19.5, 0, 0], [22, 3, 2.5]]
+    allowed_robots: ["packaging_bot_1", "packaging_bot_2"]
+    max_speed: 1.2
+    throughput_target: 120
+
+  - id: industrial_zone_010
+    name: "Emergency Exit Path"
+    type: "CLEARANCE"
+    boundaries: [[0, 5.5, 0], [22, 6.5, 3]]
+    robot_access: "FORBIDDEN_ALWAYS"
+    purpose: "Must remain clear for emergency egress"
+
+actions:
+  - id: industrial_action_001
+    name: "Pick and place component"
+    description: "Pick component from feeder and place in assembly"
+    preconditions:
+      - "robot.gripper_operational == true"
+      - "component_available == true"
+      - "assembly_station_ready == true"
+    steps:
+      - "MOVE_TO feeder_position"
+      - "GRASP component"
+      - "MOVE_TO assembly_position"
+      - "RELEASE component"
+    max_duration: 30
+    energy_estimate: 150
+
+  - id: industrial_action_002
+    name: "Quality scan"
+    description: "Perform visual inspection of assembled part"
+    preconditions:
+      - "camera_system_operational == true"
+      - "lighting_adequate == true"
+      - "part_in_position == true"
+    steps:
+      - "POSITION_CAMERA scan_position"
+      - "CAPTURE_IMAGES 5"
+      - "ANALYZE_DEFECTS"
+      - "CLASSIFY_RESULT"
+    max_duration: 15
+    required_accuracy: 0.99
+
+  - id: industrial_action_003
+    name: "Apply adhesive"
+    description: "Dispense adhesive along specified path"
+    preconditions:
+      - "adhesive_supply > 0.1"
+      - "nozzle_clear == true"
+      - "part_secured == true"
+    steps:
+      - "HEAT_NOZZLE 180"
+      - "PRIME_ADHESIVE"
+      - "FOLLOW_PATH adhesive_path"
+      - "CLEAN_NOZZLE"
+    max_duration: 45
+    temperature_control: true
+
+  - id: industrial_action_004
+    name: "Tighten fastener"
+    description: "Apply torque to fastener to specification"
+    preconditions:
+      - "torque_wrench_attached == true"
+      - "fastener_engaged == true"
+      - "access_clear == true"
+    steps:
+      - "ALIGN_TORQUE_WRENCH"
+      - "APPLY_TORQUE 25"
+      - "VERIFY_TORQUE"
+      - "RETRACT"
+    max_duration: 20
+    torque_tolerance: 0.1
+
+  - id: industrial_action_005
+    name: "Laser etch marking"
+    description: "Etch identification marking on part"
+    preconditions:
+      - "laser_safe_zone_clear == true"
+      - "part_surface_prepared == true"
+      - "fume_extraction_on == true"
+    steps:
+      - "FOCUS_LASER"
+      - "ETCH_PATTERN marking_pattern"
+      - "VERIFY_MARKING"
+      - "SAFE_LASER_OFF"
+    max_duration: 60
+    laser_class: "CLASS_4"
+
+  - id: industrial_action_006
+    name: "Palletize finished goods"
+    description: "Stack completed products on pallet"
+    preconditions:
+      - "pallet_available == true"
+      - "product_count >= 1"
+      - "stacking_pattern_loaded == true"
+    steps:
+      - "PICK_PRODUCT"
+      - "POSITION_OVER_PALLET"
+      - "PLACE_ACCORDING_TO_PATTERN"
+      - "VERIFY_STABILITY"
+    max_duration: 120
+    max_height: 2.0
+
+  - id: industrial_action_007
+    name: "Change end effector"
+    description: "Automatically change robot end effector"
+    preconditions:
+      - "tool_changer_operational == true"
+      - "target_tool_available == true"
+      - "robot_stopped == true"
+    steps:
+      - "APPROACH_TOOL_RACK"
+      - "RELEASE_CURRENT_TOOL"
+      - "ACQUIRE_NEW_TOOL"
+      - "VERIFY_TOOL_LOCK"
+    max_duration: 90
+    requires_calibration: true
+
+  - id: industrial_action_008
+    name: "Clean work area"
+    description: "Vacuum and wipe down work area"
+    preconditions:
+      - "cleaning_tools_attached == true"
+      - "area_clear_of_obstacles == true"
+    steps:
+      - "ACTIVATE_VACUUM"
+      - "COVER_AREA cleaning_path"
+      - "WIPE_SURFACE"
+      - "DISPOSE_WASTE"
+    max_duration: 300
+    cleanliness_standard: "ISO_14644_CLASS_8"
+
+  - id: industrial_action_009
+    name: "Calibration routine"
+    description: "Perform precision calibration of sensors"
+    preconditions:
+      - "calibration_target_in_place == true"
+      - "environment_stable == true"
+      - "no_vibration == true"
+    steps:
+      - "HOME_POSITION"
+      - "MEASURE_REFERENCE_POINTS 25"
+      - "CALCULATE_OFFSETS"
+      - "UPDATE_CALIBRATION_DATA"
+    max_duration: 180
+    required_precision: 0.01
+
+  - id: industrial_action_010
+    name: "Emergency shutdown procedure"
+    description: "Controlled shutdown in emergency conditions"
+    preconditions:
+      - "emergency_condition_detected == true"
+    steps:
+      - "STOP_ALL_MOTION"
+      - "SECURE_LOAD"
+      - "DISABLE_POWER_TOOLS"
+      - "ACTIVATE_SAFE_STATE"
+    max_duration: 5
+    override_all_safety: true
+
+constraints:
+  - id: industrial_constraint_001
+    name: "Maximum reach envelope"
+    description: "Robot must operate within defined reach envelope"
+    type: "KINEMATIC"
+    parameters:
+      max_reach: 2.5
+      min_reach: 0.3
+      prohibited_zones: ["maintenance_corridor", "emergency_exit"]
+
+  - id: industrial_constraint_002
+    name: "Payload moment limits"
+    description: "Payload must be within moment capacity limits"
+    type: "DYNAMIC"
+    parameters:
+      max_moment_x: 120
+      max_moment_y: 120
+      max_moment_z: 100
+      center_of_gravity_check: true
+
+  - id: industrial_constraint_003
+    name: "Cycle time constraints"
+    description: "Operation must complete within takt time"
+    type: "TEMPORAL"
+    parameters:
+      max_cycle_time: 3600
+      min_cycle_time: 120
+      synchronization_required: true
+
+  - id: industrial_constraint_004
+    name: "Energy consumption limits"
+    description: "Total energy consumption per shift limited"
+    type: "ENERGY"
+    parameters:
+      max_energy_per_shift: 15000
+      peak_power_limit: 3000
+      regenerative_braking: true
+
+  - id: industrial_constraint_005
+    name: "Tool life management"
+    description: "Tools must be replaced after specified usage"
+    type: "MAINTENANCE"
+    parameters:
+      max_operating_hours: 2000
+      preventive_maintenance_interval: 500
+      wear_monitoring: true
+
+  - id: industrial_constraint_006
+    name: "Environmental conditions"
+    description: "Operation constrained by environmental factors"
+    type: "ENVIRONMENTAL"
+    parameters:
+      temperature_range: [15, 35]
+      humidity_range: [20, 80]
+      dust_level_max: 100
+      ip_rating: "IP54"
+
+  - id: industrial_constraint_007
+    name: "Communication reliability"
+    description: "Requires minimum communication reliability"
+    type: "COMMUNICATION"
+    parameters:
+      min_signal_strength: -70
+      max_latency: 100
+      packet_loss_max: 0.01
+      redundancy_required: true
+
+  - id: industrial_constraint_008
+    name: "Safety system integrity"
+    description: "Safety systems must meet SIL rating"
+    type: "SAFETY"
+    parameters:
+      sil_rating: "SIL_2"
+      diagnostic_coverage: 0.95
+      mean_time_to_failure: 100000
+      redundant_sensors: 2
+
+  - id: industrial_constraint_009
+    name: "Positional accuracy"
+    description: "Positioning accuracy requirements"
+    type: "PRECISION"
+    parameters:
+      positional_accuracy: 0.1
+      repeatability: 0.05
+      thermal_compensation: true
+      calibration_frequency: 168
+
+  - id: industrial_constraint_010
+    name: "Human interaction constraints"
+    description: "Constraints for human-robot collaboration"
+    type: "HRC"
+    parameters:
+      minimum_separation: 0.5
+      speed_limit_near_humans: 0.25
+      force_limit: 150
+      protective_stop_response_time: 0.5

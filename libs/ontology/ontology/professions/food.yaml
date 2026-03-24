@@ -1,0 +1,436 @@
+# Food Profession Pack
+# Version: 2.1.0
+# Contains: 45 rules, 45 zones, 45 actions, 45 constraints
+# Total entries: 180
+# For: Food robots in restaurants, kitchens, food processing
+
+metadata:
+  profession: food
+  version: "2.1.0"
+  description: "Rules for food robots in food service and processing environments"
+  based_on: "FDA Food Code, HACCP, ISO 22000, AIB Standards"
+  min_trust_layer: "2.0.0"
+
+rules:
+  - id: food_rule_001
+    name: "Temperature danger zone avoidance"
+    description: "Food must not remain in temperature danger zone (4°C - 60°C) for more than 2 hours"
+    condition: "food.temperature > 4 and food.temperature < 60 and food.time_in_zone > 7200"
+    action: "DISCARD_FOOD"
+    severity: "CRITICAL"
+
+  - id: food_rule_002
+    name: "Allergen cross-contamination prevention"
+    description: "Must prevent cross-contamination between allergenic and non-allergenic foods"
+    condition: "allergen_present == true and cleaning_between_tasks == false"
+    action: "REQUIRE_CLEANING"
+    severity: "HIGH"
+
+  - id: food_rule_003
+    name: "Hand washing compliance"
+    description: "Robot must sanitize manipulators between different food types"
+    condition: "food_type_changed == true and sanitization_complete == false"
+    action: "REQUIRE_SANITIZATION"
+    severity: "HIGH"
+
+  - id: food_rule_004
+    name: "Pest presence alert"
+    description: "Alert if pests detected in food preparation areas"
+    condition: "pest_detected == true"
+    action: "ISOLATE_AREA"
+    severity: "CRITICAL"
+
+  - id: food_rule_005
+    name: "Equipment cleaning schedule"
+    description: "Equipment must be cleaned according to schedule"
+    condition: "equipment.cleaning_overdue == true"
+    action: "SCHEDULE_CLEANING"
+    severity: "MEDIUM"
+
+  - id: food_rule_006
+    name: "Foreign object detection"
+    description: "Food must be checked for foreign objects"
+    condition: "foreign_object_detected == true"
+    action: "REMOVE_CONTAMINATED_BATCH"
+    severity: "CRITICAL"
+
+  - id: food_rule_007
+    name: "Weight and measure accuracy"
+    description: "Portion sizes must be within specified tolerances"
+    condition: "portion_weight < target_weight * 0.95 or portion_weight > target_weight * 1.05"
+    action: "ADJUST_PORTION"
+    severity: "MEDIUM"
+
+  - id: food_rule_008
+    name: "Employee health exclusion"
+    description: "Robot must not handle food if exhibiting contamination risks"
+    condition: "robot.contamination_risk == true"
+    action: "ENTER_DECONTAMINATION"
+    severity: "HIGH"
+
+  - id: food_rule_009
+    name: "First-in-first-out inventory"
+    description: "Older inventory must be used before newer inventory"
+    condition: "inventory_rotation_violation == true"
+    action: "REORDER_USAGE"
+    severity: "MEDIUM"
+
+  - id: food_rule_010
+    name: "Cooking temperature validation"
+    description: "Food must reach safe internal temperatures"
+    condition: "food.internal_temperature < food.safe_temperature"
+    action: "CONTINUE_COOKING"
+    severity: "CRITICAL"
+
+zones:
+  - id: food_zone_001
+    name: "Main Kitchen Preparation"
+    type: "FOOD_PREP"
+    boundaries: [[0, 0, 0], [10, 8, 3]]
+    allowed_robots: ["prep_bot_1", "prep_bot_2"]
+    temperature_range: [10, 15]
+    cleaning_frequency: 4
+    allergen_control: true
+
+  - id: food_zone_002
+    name: "Cold Storage Walk-in"
+    type: "REFRIGERATED"
+    boundaries: [[11, 0, 0], [15, 6, 3]]
+    allowed_robots: ["cold_bot"]
+    temperature_range: [1, 4]
+    humidity_range: [70, 80]
+    door_alarm: true
+
+  - id: food_zone_003
+    name: "Cooking Line Station 1"
+    type: "HOT_PREP"
+    boundaries: [[16, 0, 0], [22, 6, 3]]
+    allowed_robots: ["cook_bot_1"]
+    temperature_range: [18, 35]
+    ventilation_required: true
+    fire_suppression: true
+
+  - id: food_zone_004
+    name: "Dishwashing Area"
+    type: "WET_PROCESSING"
+    boundaries: [[23, 0, 0], [28, 6, 3]]
+    allowed_robots: ["dish_bot"]
+    sanitation_required: true
+    water_temperature: [71, 82]
+    chemical_storage_separate: true
+
+  - id: food_zone_005
+    name: "Dry Storage Room"
+    type: "DRY_STORAGE"
+    boundaries: [[0, 9, 0], [8, 15, 3]]
+    allowed_robots: ["storage_bot"]
+    temperature_range: [15, 25]
+    humidity_range: [50, 60]
+    pest_monitoring: true
+
+  - id: food_zone_006
+    name: "Customer Service Counter"
+    type: "SERVICE"
+    boundaries: [[9, 9, 0], [15, 15, 3]]
+    allowed_robots: ["service_bot"]
+    customer_interaction: true
+    sneeze_guard_required: true
+    hand_sanitizer_station: true
+
+  - id: food_zone_007
+    name: "Bakery Oven Area"
+    type: "HIGH_HEAT"
+    boundaries: [[16, 9, 0], [22, 15, 3]]
+    allowed_robots: ["baker_bot"]
+    temperature_range: [25, 50]
+    heat_protection_required: true
+    flour_dust_control: true
+
+  - id: food_zone_008
+    name: "Receiving Dock"
+    type: "RECEIVING"
+    boundaries: [[23, 9, 0], [30, 15, 3]]
+    allowed_robots: ["receiving_bot"]
+    inspection_required: true
+    temperature_verification: true
+    pest_exclusion: true
+
+  - id: food_zone_009
+    name: "Waste Compaction Area"
+    type: "WASTE_MANAGEMENT"
+    boundaries: [[0, 16, 0], [8, 20, 3]]
+    allowed_robots: ["waste_bot"]
+    odor_control: true
+    cleaning_frequency: 8
+    separation_required: true
+
+  - id: food_zone_010
+    name: "Employee Break Room"
+    type: "NON_FOOD"
+    boundaries: [[9, 16, 0], [15, 20, 3]]
+    allowed_robots: []
+    robot_access: "FORBIDDEN"
+    food_consumption_allowed: true
+    separation_from_food_areas: true
+
+actions:
+  - id: food_action_001
+    name: "Vegetable chopping"
+    description: "Chop vegetables to specified size"
+    preconditions:
+      - "vegetables_washed == true"
+      - "cutting_board_clean == true"
+      - "knife_sharp == true"
+    steps:
+      - "SELECT_VEGETABLE"
+      - "POSITION_ON_BOARD"
+      - "CHOP_TO_SIZE"
+      - "TRANSFER_TO_CONTAINER"
+      - "CLEAN_EQUIPMENT"
+    max_duration: 300
+    cutting_size_tolerance: 0.5
+
+  - id: food_action_002
+    name: "Pizza assembly"
+    description: "Assemble pizza with toppings"
+    preconditions:
+      - "dough_prepared == true"
+      - "sauce_available == true"
+      - "toppings_prepared == true"
+    steps:
+      - "SPREAD_DOUGH"
+      - "APPLY_SAUCE"
+      - "DISTRIBUTE_CHEESE"
+      - "ARRANGE_TOPPINGS"
+      - "TRANSFER_TO_OVEN"
+    max_duration: 180
+    topping_distribution: "EVEN"
+
+  - id: food_action_003
+    name: "Dish washing cycle"
+    description: "Wash, rinse, and sanitize dishes"
+    preconditions:
+      - "dishes_loaded == true"
+      - "detergent_available == true"
+      - "hot_water_available == true"
+    steps:
+      - "PRE_RINSE"
+      - "WASH_CYCLE"
+      - "RINSE_CYCLE"
+      - "SANITIZE_CYCLE"
+      - "DRY_AND_STACK"
+    max_duration: 600
+    water_temperature_monitoring: true
+
+  - id: food_action_004
+    name: "Inventory rotation"
+    description: "Rotate inventory using FIFO method"
+    preconditions:
+      - "new_delivery_arrived == true"
+      - "storage_space_available == true"
+      - "inventory_records_updated == true"
+    steps:
+      - "SCAN_EXISTING_INVENTORY"
+      - "MOVE_OLDER_ITEMS_FORWARD"
+      - "STORE_NEW_ITEMS_IN_BACK"
+      - "UPDATE_EXPIRATION_TRACKING"
+      - "FLAG_NEAR_EXPIRATION"
+    max_duration: 900
+    expiration_date_tolerance: 2
+
+  - id: food_action_005
+    name: "Temperature monitoring round"
+    description: "Monitor temperatures of refrigeration units"
+    preconditions:
+      - "thermometers_calibrated == true"
+      - "access_to_units == true"
+      - "recording_system_ready == true"
+    steps:
+      - "APPROACH_UNIT"
+      - "RECORD_TEMPERATURE"
+      - "CHECK_DOOR_SEAL"
+      - "VERIFY_ALARM_SYSTEM"
+      - "DOCUMENT_READINGS"
+    max_duration: 600
+    temperature_tolerance: 1.0
+
+  - id: food_action_006
+    name: "Batch cooking"
+    description: "Cook large batch of food item"
+    preconditions:
+      - "ingredients_prepared == true"
+      - "cooking_equipment_ready == true"
+      - "recipe_loaded == true"
+    steps:
+      - "HEAT_COOKING_VESSEL"
+      - "ADD_INGREDIENTS_SEQUENTIALLY"
+      - "MONITOR_TEMPERATURE"
+      - "STIR_AS_NEEDED"
+      - "TEST_FOR_DONENESS"
+    max_duration: 1800
+    temperature_control: true
+
+  - id: food_action_007
+    name: "Food packaging"
+    description: "Package food for delivery or storage"
+    preconditions:
+      - "food_cooled_properly == true"
+      - "packaging_materials_available == true"
+      - "labeling_system_ready == true"
+    steps:
+      - "WEIGH_PORTION"
+      - "FILL_CONTAINER"
+      - "SEAL_CONTAINER"
+      - "APPLY_LABEL"
+      - "STACK_FOR_STORAGE"
+    max_duration: 300
+    packaging_integrity_check: true
+
+  - id: food_action_008
+    name: "Cleaning and sanitizing"
+    description: "Clean and sanitize food contact surfaces"
+    preconditions:
+      - "area_cleared == true"
+      - "cleaning_supplies_available == true"
+      - "sanitizer_concentration_correct == true"
+    steps:
+      - "REMOVE_DEBRIS"
+      - "WASH_WITH_DETERGENT"
+      - "RINSE_WITH_WATER"
+      - "APPLY_SANITIZER"
+      - "AIR_DRY"
+    max_duration: 1200
+    sanitizer_contact_time: 60
+
+  - id: food_action_009
+    name: "Order assembly for delivery"
+    description: "Assemble customer orders for delivery"
+    preconditions:
+      - "order_received == true"
+      - "all_items_available == true"
+      - "delivery_container_ready == true"
+    steps:
+      - "CONFIRM_ORDER_DETAILS"
+      - "GATHER_ITEMS"
+      - "CHECK_TEMPERATURES"
+      - "PACK_WITH_THERMAL_PROTECTION"
+      - "SEAL_AND_LABEL"
+    max_duration: 300
+    temperature_maintenance: true
+
+  - id: food_action_010
+    name: "Waste sorting and disposal"
+    description: "Sort and dispose of food waste"
+    preconditions:
+      - "waste_collected == true"
+      - "sorting_station_ready == true"
+      - "disposal_containers_available == true"
+    steps:
+      - "SORT_BY_CATEGORY"
+      - "COMPACT_IF_APPLICABLE"
+      - "TRANSFER_TO_DISPOSAL"
+      - "CLEAN_WASTE_AREA"
+      - "RECORD_WASTE_DATA"
+    max_duration: 600
+    recycling_compliance: true
+
+constraints:
+  - id: food_constraint_001
+    name: "Temperature control"
+    description: "Must maintain proper temperature control throughout flow"
+    type: "TEMPERATURE"
+    parameters:
+      hot_hold_temperature: 60
+      cold_hold_temperature: 4
+      cooling_requirements: true
+      reheating_protocols: true
+
+  - id: food_constraint_002
+    name: "Cross-contamination prevention"
+    description: "Must prevent cross-contamination between food types"
+    type: "CONTAMINATION_PREVENTION"
+    parameters:
+      color_coding: true
+      equipment_dedication: true
+      cleaning_between_tasks: true
+      allergen_management: true
+
+  - id: food_constraint_003
+    name: "Personal hygiene compliance"
+    description: "Must maintain high standards of hygiene"
+    type: "HYGIENE"
+    parameters:
+      hand_washing_frequency: 30
+      glove_use_protocol: true
+      illness_reporting: true
+      uniform_requirements: true
+
+  - id: food_constraint_004
+    name: "Pest prevention"
+    description: "Must implement comprehensive pest prevention"
+    type: "PEST_CONTROL"
+    parameters:
+      inspection_frequency: 7
+      exclusion_methods: true
+      monitoring_devices: true
+      treatment_protocols: true
+
+  - id: food_constraint_005
+    name: "Food defense"
+    description: "Must protect against intentional contamination"
+    type: "FOOD_DEFENSE"
+    parameters:
+      access_control: true
+      ingredient_verification: true
+      tamper_evident_packaging: true
+      employee_screening: true
+
+  - id: food_constraint_006
+    name: "Allergen management"
+    description: "Must properly manage allergenic ingredients"
+    type: "ALLERGEN_MANAGEMENT"
+    parameters:
+      ingredient_declaration: true
+      separation_protocols: true
+      cleaning_validation: true
+      staff_training: true
+
+  - id: food_constraint_007
+    name: "Equipment maintenance"
+    description: "Must maintain equipment in food-safe condition"
+    type: "EQUIPMENT"
+    parameters:
+      preventive_maintenance: true
+      calibration_schedule: true
+      food_contact_surface_materials: ["STAINLESS_STEEL", "FDA_PLASTIC"]
+      lubricant_requirements: "FOOD_GRADE"
+
+  - id: food_constraint_008
+    name: "Water and ice safety"
+    description: "Must ensure water and ice safety"
+    type: "WATER_SAFETY"
+    parameters:
+      water_testing_frequency: 30
+      ice_machine_cleaning: 7
+      backflow_prevention: true
+      plumbing_standards: true
+
+  - id: food_constraint_009
+    name: "Waste management"
+    description: "Must properly manage food waste"
+    type: "WASTE_MANAGEMENT"
+    parameters:
+      separation_requirements: true
+      storage_conditions: true
+      disposal_frequency: true
+      recycling_targets: true
+
+  - id: food_constraint_010
+    name: "Traceability and recall"
+    description: "Must maintain traceability for recall capability"
+    type: "TRACEABILITY"
+    parameters:
+      lot_tracking: true
+      supplier_records: true
+      distribution_records: true
+      recall_procedures: true
