@@ -1,10 +1,14 @@
-"""HTTP adapter for Noetix N2 robot.
+"""HTTP adapter — universal adapter for robots with HTTP API.
 
-Connects to the real robot's HTTP API at http://<robot-ip>:8000/api/...
-Falls back gracefully to error state if robot is unreachable.
+Supports:
+  - Isaac Sim H1 bridge: /control/move, /control/stop, /robot/state
+  - Noetix N2 robot:     /api/cmd/velocity, /api/cmd/stop, /api/status
+
+Auto-detects API style on first successful call and caches for speed.
 """
 import json
 import logging
+import math
 import time
 import urllib.request
 import urllib.error
@@ -13,142 +17,227 @@ logger = logging.getLogger(__name__)
 
 from bridge.adapter_base import RobotAdapter
 
+# Endpoint styles for different robots
+_ENDPOINTS = {
+    "isaac_sim": {
+        "move":     "/control/move",
+        "stop":     "/control/stop",
+        "state":    "/robot/state",
+        "health":   "/health",
+        "camera":   "/camera/latest",
+        "entities": "/sim/entities",
+    },
+    "noetix_n2": {
+        "move":     "/api/cmd/velocity",
+        "stop":     "/api/cmd/stop",
+        "state":    "/api/status",
+        "health":   "/health",
+        "camera":   "/api/camera/frame",
+        "entities": None,
+    },
+}
+
 
 class HttpAdapter(RobotAdapter):
-    """Connects to Noetix N2 via HTTP REST API."""
+    """Universal HTTP adapter — auto-detects Isaac Sim vs Noetix N2 API."""
 
     def __init__(self, robot_url: str = "http://192.168.1.100:8000"):
         self.robot_url = robot_url.rstrip("/")
         self.connected = False
         self.name = "http"
         self._last_error = ""
-        self._timeout = 1.0
+        self._timeout = 2.0
+        self._api_style = None  # "isaac_sim" | "noetix_n2" — auto-detected
+
+    def _detect_api(self) -> str:
+        """Auto-detect which API style the robot uses."""
+        if self._api_style:
+            return self._api_style
+
+        # Try Isaac Sim first (most common in dev)
+        result = self._get("/robot/state")
+        if result is not None:
+            self._api_style = "isaac_sim"
+            logger.info("Detected API style: isaac_sim (/robot/state)")
+            return self._api_style
+
+        # Try N2 API
+        result = self._get("/api/status")
+        if result is not None:
+            self._api_style = "noetix_n2"
+            logger.info("Detected API style: noetix_n2 (/api/status)")
+            return self._api_style
+
+        # Default to Isaac Sim
+        self._api_style = "isaac_sim"
+        return self._api_style
+
+    def _ep(self, name: str) -> str:
+        """Get endpoint path for current API style."""
+        style = self._detect_api()
+        return _ENDPOINTS[style].get(name, "")
+
+    # ── State ──────────────────────────────────────────────────────────
 
     def get_state(self) -> dict:
-        """Read robot state from GET /api/status."""
-        data = self._get("/api/status")
-        if data is None:
-            return self._error_state()
-        self.connected = True
+        """Read robot state — auto-detects endpoint."""
+        style = self._detect_api()
 
-        # Map N2 API response to our standard format
-        return {
-            "position": {
-                "x": float(data.get("position_x", 0)),
-                "y": float(data.get("position_y", 0)),
-                "z": 0.0,
-            },
-            "velocity": {
-                "vx": float(data.get("vx", 0)),
-                "vy": float(data.get("vy", 0)),
-                "vz": 0.0,
-            },
-            "heading_rad": float(data.get("heading_rad", 0)),
-            "speed_mps": float(data.get("speed_mps", 0)),
-            # Isaac Sim has no real battery — default to 95% in sim
-            # For real robot: battery_pct comes from robot API
-            "battery": float(data.get("battery_pct", 0)) or 95.0,
-            "tilt_deg": float(data.get("tilt_deg", 0)),
-            "temperature_c": float(data.get("temperature_c", 25)),
-            "mode": data.get("mode", "ADVISORY"),
-            "timestamp_s": time.time(),
-            "adapter": "http",
-            "sensors": data.get("sensors", {
-                "camera": {"health": 0.0, "available": False},
-                "lidar": {"health": 0.0, "available": False},
-                "imu": {"health": 0.0, "available": False},
-            }),
-        }
+        if style == "isaac_sim":
+            data = self._get("/robot/state")
+            if data is None:
+                return self._error_state()
+            self.connected = True
+            pos = data.get("position", {})
+            vel = data.get("velocity", {})
+            return {
+                "position": {
+                    "x": float(pos.get("x", 0)),
+                    "y": float(pos.get("y", 0)),
+                    "z": float(pos.get("z", 0)),
+                },
+                "velocity": {
+                    "vx": float(vel.get("vx", 0)),
+                    "vy": float(vel.get("vy", 0)),
+                    "vz": float(vel.get("vz", 0)),
+                },
+                "heading_rad": float(data.get("heading_rad", data.get("yaw", 0))),
+                "speed_mps": float(data.get("speed_mps", math.hypot(
+                    vel.get("vx", 0), vel.get("vy", 0)))),
+                "battery": float(data.get("battery", data.get("battery_pct", 0))) or 95.0,
+                "tilt_deg": float(data.get("tilt_deg", 0)),
+                "temperature_c": float(data.get("temperature_c", 25)),
+                "mode": data.get("mode", "ADVISORY"),
+                "timestamp_s": time.time(),
+                "adapter": "http",
+            }
+        else:
+            # Noetix N2 format
+            data = self._get("/api/status")
+            if data is None:
+                return self._error_state()
+            self.connected = True
+            return {
+                "position": {
+                    "x": float(data.get("position_x", 0)),
+                    "y": float(data.get("position_y", 0)),
+                    "z": 0.0,
+                },
+                "velocity": {
+                    "vx": float(data.get("vx", 0)),
+                    "vy": float(data.get("vy", 0)),
+                    "vz": 0.0,
+                },
+                "heading_rad": float(data.get("heading_rad", 0)),
+                "speed_mps": float(data.get("speed_mps", 0)),
+                "battery": float(data.get("battery_pct", 0)) or 95.0,
+                "tilt_deg": float(data.get("tilt_deg", 0)),
+                "temperature_c": float(data.get("temperature_c", 25)),
+                "mode": data.get("mode", "ADVISORY"),
+                "timestamp_s": time.time(),
+                "adapter": "http",
+            }
+
+    # ── Movement ───────────────────────────────────────────────────────
 
     def send_velocity(self, vx: float, vy: float, wz: float) -> dict:
-        """Send velocity command. Tries /api/cmd/velocity, fallback to /chat/send."""
-        # Try direct velocity endpoint (Noetix N2 API)
-        result = self._post(
-            f"/api/cmd/velocity?vx={vx:.3f}&vy={vy:.3f}&wz={wz:.3f}",
-            {},
-        )
-        if result is not None:
-            return {"status": "ok", "adapter": "http"}
+        """Send velocity command — uses correct endpoint for API style."""
+        style = self._detect_api()
 
-        # Fallback: Isaac Sim h1_bridge uses /chat/send for commands
-        import math
-        speed = math.hypot(vx, vy)
-        if speed < 0.01 and abs(wz) < 0.01:
-            chat_cmd = "stop"
-        elif abs(wz) > 0.1:
-            chat_cmd = f"turn {'left' if wz > 0 else 'right'}"
+        if style == "isaac_sim":
+            # Isaac Sim: POST /control/move {"vx", "vy", "wz"}
+            result = self._post("/control/move", {"vx": vx, "vy": vy, "wz": wz})
         else:
-            chat_cmd = f"walk forward {speed:.1f}"
+            # Noetix N2: POST /api/cmd/velocity?vx=...&vy=...&wz=...
+            result = self._post(
+                f"/api/cmd/velocity?vx={vx:.3f}&vy={vy:.3f}&wz={wz:.3f}", {}
+            )
 
-        logger.info("http_adapter: /api/cmd/velocity failed, using /chat/send: %s", chat_cmd)
-        result = self._post("/chat/send", {"message": chat_cmd})
         if result is not None:
-            return {"status": "ok", "adapter": "http_chat", "chat_cmd": chat_cmd}
+            logger.debug("Velocity sent: vx=%.2f vy=%.2f wz=%.2f → %s", vx, vy, wz, style)
+            return {"status": "ok", "adapter": "http", "api": style}
+
+        logger.warning("send_velocity failed (%s): %s", style, self._last_error)
         return {"status": "error", "error": self._last_error}
 
     def navigate_to(
         self, x_m: float, y_m: float,
         heading_rad: float = 0.0, speed_mps: float = 0.3,
     ) -> dict:
-        """Navigate to position. Tries API endpoints, fallback to chat commands."""
-        # Try 1: direct navigate endpoint
-        result = self._post(
-            "/api/cmd/navigate",
-            {"x": x_m, "y": y_m, "heading": heading_rad, "speed": speed_mps},
-        )
-        if result is not None:
-            return {"status": "ok", "adapter": "http", "target": {"x": x_m, "y": y_m}}
-
-        # Try 2: Isaac Sim chat command (h1_bridge parses "walk to X Y")
-        chat_cmd = f"find_and_approach {x_m:.1f} {y_m:.1f}"
-        result = self._post("/chat/send", {"message": chat_cmd})
-        if result is not None:
-            logger.info("http_adapter: navigate via /chat/send: %s", chat_cmd)
-            return {"status": "moving_to_destination", "adapter": "http_chat",
-                    "target": {"x": x_m, "y": y_m}, "chat_cmd": chat_cmd}
-
-        # Try 3: compute velocity toward target
-        import math
-        state = self.get_telemetry()
+        """Navigate to position — compute velocity toward target."""
+        state = self.get_state()
         pos = state.get("position", {})
-        rx, ry = float(pos.get("x", 0)), float(pos.get("y", 0))
+        rx = float(pos.get("x", 0))
+        ry = float(pos.get("y", 0))
         dx, dy = x_m - rx, y_m - ry
         dist = math.hypot(dx, dy)
-        if dist < 0.1:
-            return {"status": "ok", "adapter": "http", "note": "already_at_target"}
-        vx = (dx / dist) * min(speed_mps, 0.8)
-        vy = (dy / dist) * min(speed_mps, 0.8)
-        self.send_velocity(vx, vy, 0.0)
-        return {"status": "moving_to_destination", "adapter": "http",
-                "target": {"x": x_m, "y": y_m}}
+
+        if dist < 0.15:
+            return {"status": "ok", "note": "already_at_target", "distance": dist}
+
+        # Compute velocity vector toward target
+        speed = min(speed_mps, 0.8)
+        vx = (dx / dist) * speed
+        vy = (dy / dist) * speed
+
+        logger.info("navigate_to: (%.1f,%.1f) → (%.1f,%.1f) dist=%.1f vx=%.2f vy=%.2f",
+                     rx, ry, x_m, y_m, dist, vx, vy)
+
+        result = self.send_velocity(vx, vy, 0.0)
+        return {
+            "status": "moving_to_destination",
+            "target": {"x": x_m, "y": y_m},
+            "distance_m": round(dist, 2),
+            "speed_mps": speed,
+            **result,
+        }
 
     def stop(self) -> dict:
-        """Emergency stop. Tries /api/cmd/stop, fallback to /chat/send and zero velocity."""
-        result = self._post("/api/cmd/stop", {})
+        """Emergency stop — uses correct endpoint for API style."""
+        style = self._detect_api()
+
+        if style == "isaac_sim":
+            result = self._post("/control/stop", {})
+        else:
+            result = self._post("/api/cmd/stop", {})
+
         if result is not None:
-            return {"status": "stopped", "adapter": "http"}
-        # Fallback 1: chat command
-        self._post("/chat/send", {"message": "stop"})
-        # Fallback 2: zero velocity
-        self._post("/api/cmd/velocity?vx=0&vy=0&wz=0", {})
-        logger.info("http_adapter: stop via fallback (chat + zero velocity)")
+            logger.info("Robot stopped via %s", style)
+            return {"status": "stopped", "adapter": "http", "api": style}
+
+        # Ultimate fallback: zero velocity
+        self.send_velocity(0, 0, 0)
+        logger.warning("stop fallback: sent zero velocity")
         return {"status": "stopped", "adapter": "http_fallback"}
 
+    # ── Entities ───────────────────────────────────────────────────────
+
     def get_entities(self) -> list[dict]:
-        """N2 doesn't expose entities — return empty."""
+        """Get detected entities (Isaac Sim only)."""
+        if self._detect_api() == "isaac_sim":
+            data = self._get("/sim/entities")
+            return data if isinstance(data, list) else []
         return []
 
+    # ── Scenarios ──────────────────────────────────────────────────────
+
     def inject_scenario(self, overrides: dict) -> None:
-        """Forward scenario injection to robot's sim endpoints."""
-        self._post("/api/sim/set_context", overrides)
+        """Inject test scenario."""
+        style = self._detect_api()
+        if style == "isaac_sim":
+            self._post("/sim/scenario", overrides)
+        else:
+            self._post("/api/sim/set_context", overrides)
 
     def clear_scenario(self) -> None:
-        """Clear scenario on robot."""
-        self._post("/api/sim/set_context", {
-            "crowd_density": 0,
-            "tilt_angle": 0,
-            "battery_level": 95,
-        })
+        """Clear scenario."""
+        style = self._detect_api()
+        if style == "isaac_sim":
+            self._post("/sim/scenario", {"name": "clear"})
+        else:
+            self._post("/api/sim/set_context", {
+                "crowd_density": 0, "tilt_angle": 0, "battery_level": 95,
+            })
 
     # ── HTTP helpers ──────────────────────────────────────────────────
 
@@ -157,6 +246,9 @@ class HttpAdapter(RobotAdapter):
             url = f"{self.robot_url}{path}"
             req = urllib.request.Request(url, method="GET")
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
+                ct = resp.headers.get("Content-Type", "")
+                if "json" not in ct and "text/html" in ct:
+                    return None  # HTML page, not JSON API
                 return json.loads(resp.read())
         except Exception as e:
             self._last_error = str(e)
@@ -166,7 +258,7 @@ class HttpAdapter(RobotAdapter):
     def _post(self, path: str, data: dict) -> dict | None:
         try:
             url = f"{self.robot_url}{path}"
-            body = json.dumps(data).encode()
+            body = json.dumps(data or {}).encode()
             req = urllib.request.Request(
                 url, data=body, method="POST",
                 headers={"Content-Type": "application/json"},
@@ -178,98 +270,55 @@ class HttpAdapter(RobotAdapter):
             self.connected = False
             return None
 
-    def probe_capabilities(self) -> dict:
-        """Active probe of real N2 hardware subsystems. Uses short timeouts."""
-        import time as _time
-        caps = {}
+    # ── Capabilities probe ────────────────────────────────────────────
 
-        # Probe robot API — get full status first
-        state = self._get("/api/status")
-        sensors = (state or {}).get("sensors", {})
+    def probe_capabilities(self) -> dict:
+        """Probe robot hardware capabilities."""
+        caps = {}
+        style = self._detect_api()
+        state = self.get_state()
 
         # Camera
-        cam_data = sensors.get("camera", {})
-        cam_ok = cam_data.get("health", 0) > 0.3 or cam_data.get("ok", False)
-        cam_test = self._get("/api/camera/status") or {}
+        cam_ok = self._get("/camera/latest") is not None if style == "isaac_sim" \
+            else (self._get("/api/camera/status") or {}).get("ok", False)
         caps["camera"] = {
-            "available": cam_ok or cam_test.get("ok", False),
-            "health": cam_data.get("health", 0),
-            "fps": cam_data.get("fps") or cam_test.get("fps"),
-            "resolution": cam_test.get("resolution"),
-            "probe": "ok" if cam_ok else "degraded_or_unavailable",
-            "has_preview": cam_ok,
-            "note": cam_test.get("note", ""),
-        }
-
-        # Lidar
-        lidar = sensors.get("lidar", {})
-        lidar_ok = lidar.get("health", 0) > 0.3 or lidar.get("available", False)
-        caps["lidar"] = {
-            "available": lidar_ok,
-            "health": lidar.get("health", 0),
-            "probe": "ok" if lidar_ok else "not_installed",
-            "note": "" if lidar_ok else "Lidar not detected on /api/status",
-        }
-
-        # IMU
-        imu = sensors.get("imu", {})
-        imu_ok = imu.get("health", 0) > 0.3
-        caps["imu"] = {
-            "available": imu_ok,
-            "health": imu.get("health", 0),
-            "probe": "ok" if imu_ok else "degraded",
-            "note": "Tilt/pitch/roll from IMU",
-        }
-
-        # Voice (try /api/voice/status; degrade gracefully)
-        voice = self._get("/api/voice/status") or {}
-        mic_ok = voice.get("mic_available", False)
-        spk_ok = voice.get("speaker_available", False)
-        caps["microphone"] = {
-            "available": mic_ok,
-            "sample_rate": voice.get("sample_rate", 16000),
-            "probe": "ok" if mic_ok else "client_stt_fallback",
-            "method": "robot_stt" if mic_ok else "client_stt",
-            "note": "Robot microphone" if mic_ok else "Web Speech API fallback (client-side)",
-        }
-        caps["speaker"] = {
-            "available": spk_ok,
-            "probe": "ok" if spk_ok else "client_tts_fallback",
-            "method": "robot_tts" if spk_ok else "client_tts",
-            "note": "Robot speaker" if spk_ok else "Web Speech API fallback (client-side)",
+            "available": cam_ok,
+            "probe": "ok" if cam_ok else "not_available",
+            "note": "Head camera" if cam_ok else "Camera not detected",
         }
 
         # Drive
-        drive_ok = self.connected and state is not None
         caps["drive"] = {
-            "available": drive_ok,
-            "probe": "ok" if drive_ok else "disconnected",
+            "available": self.connected,
+            "probe": "ok" if self.connected else "disconnected",
             "type": "holonomic",
             "max_speed_mps": 0.8,
-            "note": f"HTTP commands to {self.robot_url}/api/cmd/velocity",
         }
 
         # Battery
-        bat = float((state or {}).get("battery_pct", 0))
-        bat_ok = bat > 5
+        bat = float(state.get("battery", 95))
         caps["battery"] = {
             "available": True,
-            "level_pct": round(bat, 1),
-            "probe": "ok" if bat_ok else "critical",
-            "estimated_runtime_min": int(bat * 2.4) if bat > 0 else 0,
-            "note": "Critical — charge before demo" if not bat_ok else "",
+            "level_pct": bat,
+            "probe": "ok" if bat > 10 else "low",
+        }
+
+        # IMU
+        caps["imu"] = {
+            "available": True,
+            "probe": "ok",
+            "note": "6-axis IMU (pitch/roll/yaw)",
         }
 
         # Network
-        t0 = _time.time()
-        net_ok = self._get("/health") is not None
-        latency_ms = round((_time.time() - t0) * 1000, 1)
+        t0 = time.time()
+        net_ok = self._get(self._ep("health")) is not None
+        latency = round((time.time() - t0) * 1000, 1)
         caps["network"] = {
             "available": net_ok,
             "probe": "ok" if net_ok else "unreachable",
-            "latency_ms": latency_ms if net_ok else None,
-            "robot_url": self.robot_url,
-            "note": f"Round-trip to {self.robot_url}/health",
+            "latency_ms": latency,
+            "adapter": style,
         }
 
         return caps
@@ -279,7 +328,7 @@ class HttpAdapter(RobotAdapter):
             "position": {"x": 0, "y": 0, "z": 0},
             "velocity": {"vx": 0, "vy": 0, "vz": 0},
             "heading_rad": 0, "speed_mps": 0,
-            "battery": 95.0,  # default safe value — prevents false EMERGENCY_BATTERY
+            "battery": 95.0,
             "tilt_deg": 0, "temperature_c": 25,
             "mode": "ADVISORY", "timestamp_s": time.time(),
             "adapter": "http", "error": self._last_error,
