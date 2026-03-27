@@ -9,6 +9,7 @@ Auto-detects API style on first successful call and caches for speed.
 import json
 import logging
 import math
+import os
 import time
 import urllib.request
 import urllib.error
@@ -238,6 +239,15 @@ class HttpAdapter(RobotAdapter):
             self._post("/api/sim/set_context", {
                 "crowd_density": 0, "tilt_angle": 0, "battery_level": 95,
             })
+
+    # ── Coordinate transform ─────────────────────────────────────────
+
+    def coordinate_transform(self, facility_x, facility_y, facility_theta=0.0):
+        """HttpAdapter: apply offset if configured."""
+        offset_x = float(os.getenv("COORD_OFFSET_X", "0"))
+        offset_y = float(os.getenv("COORD_OFFSET_Y", "0"))
+        offset_theta = float(os.getenv("COORD_OFFSET_THETA", "0"))
+        return (facility_x + offset_x, facility_y + offset_y, facility_theta + offset_theta)
 
     # ── HTTP helpers ──────────────────────────────────────────────────
 

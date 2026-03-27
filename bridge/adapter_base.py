@@ -179,6 +179,34 @@ class RobotAdapter(abc.ABC):
             "note": "This adapter does not implement navigate_to",
         }
 
+    def coordinate_transform(self, facility_x: float, facility_y: float, facility_theta: float = 0.0) -> tuple:
+        """Transform facility coordinates to robot local frame.
+
+        Override in subclass if robot uses different coordinate system.
+        Default: identity transform (facility = robot frame).
+
+        Returns: (robot_x, robot_y, robot_theta)
+        """
+        return (facility_x, facility_y, facility_theta)
+
+    def mode_control(self, mode: str) -> dict:
+        """Set robot operating mode.
+
+        Modes: AUTOMATIC, SEMIAUTOMATIC, MANUAL, SERVICE, PAUSE
+        Mapping to Trust Layer: AUTOMATIC->FULL, SEMIAUTOMATIC->ADVISORY, MANUAL->SHADOW
+
+        Returns: {"ok": True, "mode": mode}
+        """
+        mode_map = {
+            "AUTOMATIC": "FULL",
+            "SEMIAUTOMATIC": "ADVISORY",
+            "MANUAL": "SHADOW",
+            "SERVICE": "DISABLED",
+            "PAUSE": "SHADOW",
+        }
+        tl_mode = mode_map.get(mode, "ADVISORY")
+        return {"ok": True, "mode": tl_mode, "vda5050_mode": mode}
+
     def get_lidar_scan(self) -> dict:
         """Return latest LiDAR scan data.
 
