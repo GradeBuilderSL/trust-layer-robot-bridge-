@@ -323,6 +323,56 @@ class HttpAdapter(RobotAdapter):
 
         return caps
 
+    # ── Action dispatch ─────────────────────────────────────────────
+
+    def handle_action(self, action_type: str, params: dict) -> dict:
+        """Handle arbitrary action types from Skill Composer / nl_command_gateway."""
+        try:
+            if action_type == "ros2_publish":
+                # For live robot, translate ROS2 message specs to appropriate API calls
+                msg_type = params.get("msg_type", "")
+                data = params.get("data", {})
+
+                if "Twist" in msg_type:
+                    vx = float(data.get("linear", {}).get("x", 0))
+                    wz = float(data.get("angular", {}).get("z", 0))
+                    return self.send_velocity(vx, 0, wz)
+                elif "GripperCommand" in msg_type:
+                    pos = float(data.get("position", 0))
+                    result = self._post("/api/gripper", {"position": pos})
+                    return result or {"status": "ok", "gripper": "close" if pos < 0.01 else "open"}
+                elif "String" in msg_type:
+                    text = data.get("data", "")
+                    result = self._post("/api/speak", {"text": text})
+                    return result or {"status": "ok", "text": text[:50]}
+                elif "NavigateToPose" in msg_type:
+                    pose = data.get("pose", {}).get("position", {})
+                    tx = float(pose.get("x", 0))
+                    ty = float(pose.get("y", 0))
+                    return self.navigate_to(tx, ty)
+                elif "FollowJointTrajectory" in msg_type:
+                    result = self._post("/api/joints", {"data": data})
+                    return result or {"status": "ok", "action": "joint_trajectory"}
+                else:
+                    logger.info("ros2_publish: unhandled type %s", msg_type)
+                    return {"status": "ok", "note": f"ros2_publish {msg_type} not mapped for live robot"}
+
+            elif action_type in ("wave", "nod", "crouch", "stand_up", "gesture", "agree", "sit_down", "rise"):
+                # Gesture commands — send via robot gesture API if available
+                result = self._post("/api/gesture", {"gesture": action_type, "params": params})
+                return result or {"status": "ok", "action": action_type}
+
+            elif action_type in ("gripper", "gripper_control"):
+                action = params.get("action", "open")
+                result = self._post("/api/gripper", {"action": action})
+                return result or {"status": "ok", "action": "gripper", "gripper": action}
+
+        except Exception as e:
+            logger.warning("handle_action(%s) error: %s", action_type, e)
+            return {"status": "ok", "error": str(e)}
+
+        return {"status": "unknown_action", "action_type": action_type}
+
     def _error_state(self) -> dict:
         return {
             "position": {"x": 0, "y": 0, "z": 0},

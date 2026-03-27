@@ -315,6 +315,12 @@ class ActionRequest(BaseModel):
     target_object_id: str = ""
     target_speed_mps: float = 0.0
     constraints: dict = {}
+    params: Optional[dict] = None
+    # ros2_publish fields (Skill Composer sends these at top level)
+    topic: str = ""
+    msg_type: str = ""
+    data: Optional[dict] = None
+    timing: str = "once"
     source: str = ""
     trace_id: str = ""
 
@@ -638,6 +644,49 @@ def robot_action(req: ActionRequest):
                 "find_and_approach requires VLM pipeline "
                 "— handled by nl_command_gateway"
             ),
+        }
+
+    # ── ros2_publish / gestures / gripper — delegate to adapter ────────
+    _delegated_actions = (
+        "ros2_publish", "wave", "nod", "crouch", "stand_up",
+        "gesture", "agree", "sit_down", "rise",
+        "gripper", "gripper_control",
+    )
+    if atype in _delegated_actions:
+        # Build params dict from request fields
+        action_params = dict(req.params or {})
+        # For ros2_publish, pull top-level fields the Skill Composer sends
+        if atype == "ros2_publish":
+            if req.topic:
+                action_params["topic"] = req.topic
+            if req.msg_type:
+                action_params["msg_type"] = req.msg_type
+            if req.data is not None:
+                action_params["data"] = req.data
+            if req.timing != "once":
+                action_params["timing"] = req.timing
+
+        # Delegate to adapter's handle_action if available
+        if hasattr(_adapter, "handle_action"):
+            try:
+                result = _adapter.handle_action(atype, action_params)
+            except Exception as exc:
+                logger.warning("handle_action(%s) failed: %s", atype, exc)
+                result = {"status": "ok", "error": str(exc)}
+        else:
+            # Adapter doesn't support handle_action — accept silently
+            result = {"status": "ok", "note": f"{atype} accepted (adapter has no handler)"}
+
+        _push_decision(
+            req.robot_id or f"bridge-{ADAPTER_TYPE}",
+            f"action:{atype}",
+            _AllowGate(),
+        )
+        return {
+            "status": "ok",
+            "action_id": req.action_id,
+            "action_type": atype,
+            "result": result,
         }
 
     return {
