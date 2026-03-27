@@ -5,9 +5,15 @@ Supports:
   - Noetix N2 robot:     /api/cmd/velocity, /api/cmd/stop, /api/status
 
 Auto-detects API style on first successful call and caches for speed.
+
+Optional auth (OEM HTTP API, e.g. Noetix on :8080):
+  ROBOT_HTTP_AUTHORIZATION — full ``Authorization`` header value (e.g. ``Bearer <token>`` or ``Token <t>``).
+  ROBOT_BEARER_TOKEN — shorthand: sets ``Authorization: Bearer <token>`` if ROBOT_HTTP_AUTHORIZATION is unset.
+  ROBOT_API_KEY — sets ``X-API-Key: <key>`` (if the robot expects this header instead).
 """
 import json
 import logging
+import os
 import math
 import time
 import urllib.request
@@ -48,28 +54,70 @@ class HttpAdapter(RobotAdapter):
         self._last_error = ""
         self._timeout = 2.0
         self._api_style = None  # "isaac_sim" | "noetix_n2" — auto-detected
+        self._auth_headers: dict[str, str] = self._auth_headers_from_env()
+
+    @staticmethod
+    def _auth_headers_from_env() -> dict[str, str]:
+        h: dict[str, str] = {}
+        auth = os.getenv("ROBOT_HTTP_AUTHORIZATION", "").strip()
+        if auth:
+            h["Authorization"] = auth
+        else:
+            bearer = os.getenv("ROBOT_BEARER_TOKEN", "").strip()
+            if bearer:
+                h["Authorization"] = f"Bearer {bearer}"
+        api_key = os.getenv("ROBOT_API_KEY", "").strip()
+        if api_key:
+            h["X-API-Key"] = api_key
+        return h
+
+    def _apply_auth(self, req: urllib.request.Request) -> None:
+        for name, value in self._auth_headers.items():
+            req.add_header(name, value)
+
+    @staticmethod
+    def _looks_like_isaac_state(data: dict | None) -> bool:
+        """Reject error JSON / empty dict so we do not label a real robot as Isaac Sim."""
+        if not isinstance(data, dict) or not data:
+            return False
+        if data.get("error") is not None and "position" not in data and "velocity" not in data:
+            return False
+        return "position" in data or "velocity" in data
+
+    @staticmethod
+    def _looks_like_noetix_status(data: dict | None) -> bool:
+        if not isinstance(data, dict) or not data:
+            return False
+        if data.get("error") is not None and "position_x" not in data:
+            return False
+        n2_keys = ("position_x", "position_y", "battery_pct", "vx", "vy", "wz", "mode")
+        return any(k in data for k in n2_keys)
 
     def _detect_api(self) -> str:
         """Auto-detect which API style the robot uses."""
         if self._api_style:
             return self._api_style
 
-        # Try Isaac Sim first (most common in dev)
+        # Try Isaac Sim first (dev / sim)
         result = self._get("/robot/state")
-        if result is not None:
+        if self._looks_like_isaac_state(result):
             self._api_style = "isaac_sim"
             logger.info("Detected API style: isaac_sim (/robot/state)")
             return self._api_style
 
-        # Try N2 API
+        # Noetix N2 (real robot HTTP API)
         result = self._get("/api/status")
-        if result is not None:
+        if self._looks_like_noetix_status(result):
             self._api_style = "noetix_n2"
             logger.info("Detected API style: noetix_n2 (/api/status)")
             return self._api_style
 
-        # Default to Isaac Sim
-        self._api_style = "isaac_sim"
+        # No clear match — prefer N2 for http adapter on unknown hardware
+        self._api_style = "noetix_n2"
+        logger.warning(
+            "Could not confirm API style (/robot/state and /api/status unclear); "
+            "defaulting to noetix_n2 — set ROBOT_URL to robot base URL with /api/status"
+        )
         return self._api_style
 
     def _ep(self, name: str) -> str:
@@ -114,7 +162,7 @@ class HttpAdapter(RobotAdapter):
         else:
             # Noetix N2 format
             data = self._get("/api/status")
-            if data is None:
+            if data is None or not self._looks_like_noetix_status(data):
                 return self._error_state()
             self.connected = True
             return {
@@ -245,6 +293,7 @@ class HttpAdapter(RobotAdapter):
         try:
             url = f"{self.robot_url}{path}"
             req = urllib.request.Request(url, method="GET")
+            self._apply_auth(req)
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 ct = resp.headers.get("Content-Type", "")
                 if "json" not in ct and "text/html" in ct:
@@ -263,6 +312,7 @@ class HttpAdapter(RobotAdapter):
                 url, data=body, method="POST",
                 headers={"Content-Type": "application/json"},
             )
+            self._apply_auth(req)
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 return json.loads(resp.read())
         except Exception as e:
@@ -310,9 +360,10 @@ class HttpAdapter(RobotAdapter):
             "note": "6-axis IMU (pitch/roll/yaw)",
         }
 
-        # Network
+        # Network — use same path as telemetry (/health often missing on Noetix; was false "unreachable")
         t0 = time.time()
-        net_ok = self._get(self._ep("health")) is not None
+        state_path = self._ep("state") or "/health"
+        net_ok = self._get(state_path) is not None
         latency = round((time.time() - t0) * 1000, 1)
         caps["network"] = {
             "available": net_ok,

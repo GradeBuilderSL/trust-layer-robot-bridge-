@@ -11,3 +11,6 @@ build/
 .vscode/
 *.log
 .DS_Store
+
+# Offline build artifacts (regenerate with scripts/download_wheels.ps1)
+wheels/*.whl

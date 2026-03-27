@@ -6,6 +6,9 @@
 #   bash update_bridge.sh
 #
 # Что делает: pull новый код, пересобрать Docker, перезапустить
+#
+# Без GitHub на роботе (нет DNS): обновите код с ПК (scp), затем:
+#   SKIP_GIT_PULL=1 bash update_bridge.sh
 
 set -e
 
@@ -21,14 +24,20 @@ if [ ! -f "bridge/main.py" ]; then
     exit 1
 fi
 
-# Pull latest code
+# Pull latest code (optional — робот без интернета: SKIP_GIT_PULL=1)
 echo "1/4  Загрузка обновлений из Git..."
-git pull origin main --ff-only || {
-    echo "ОШИБКА: не удалось обновить. Возможно есть локальные изменения."
-    echo "  Выполните: git stash && git pull origin main && git stash pop"
-    exit 1
-}
-echo "     ✓ Код обновлён"
+if [ "${SKIP_GIT_PULL:-0}" = "1" ]; then
+    echo "     ⊗ Пропуск git pull (SKIP_GIT_PULL=1 — код уже скопирован с ПК или без сети)"
+else
+    git pull origin main --ff-only || {
+        echo "ОШИБКА: не удалось обновить. Возможно есть локальные изменения или нет сети."
+        echo "  С ПК: scp -r ... noetix@ROBOT:~/trust-layer-robot-bridge/"
+        echo "  На роботе без GitHub: SKIP_GIT_PULL=1 bash update_bridge.sh"
+        echo "  Или: git stash && git pull origin main && git stash pop"
+        exit 1
+    }
+    echo "     ✓ Код обновлён"
+fi
 echo ""
 
 # Rebuild Docker image
@@ -70,6 +79,9 @@ docker run -d \
     --network host \
     -e ADAPTER_TYPE="${ADAPTER}" \
     -e ROBOT_URL="${ROBOT_URL_VAR}" \
+    -e ROBOT_HTTP_AUTHORIZATION="${ROBOT_HTTP_AUTHORIZATION:-}" \
+    -e ROBOT_BEARER_TOKEN="${ROBOT_BEARER_TOKEN:-}" \
+    -e ROBOT_API_KEY="${ROBOT_API_KEY:-}" \
     -e BRIDGE_PORT="${BRIDGE_PORT}" \
     -e WORKSTATION_URL="${WORKSTATION}" \
     -e DECISION_LOG_URL="${DECISION_LOG_URL:-}" \
