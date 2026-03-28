@@ -87,9 +87,24 @@ func NewSafetyGate() *SafetyGate {
 	}
 }
 
-// Check validates an action request.
+// UpdateTelemetry updates the cached robot sensor values.
+// Called from /robot/state or embedded in action params.
+func (g *SafetyGate) UpdateTelemetry(battery, tilt, humanDist float64) {
+	if battery >= 0 {
+		g.lastBattery = battery
+	}
+	if tilt >= 0 {
+		g.lastTilt = tilt
+	}
+	if humanDist >= 0 {
+		g.lastHumanDist = humanDist
+	}
+	g.lastUpdate = time.Now()
+}
+
+// Check validates an action request against all 131 compiled safety rules.
 func (g *SafetyGate) Check(req *ActionRequest) GateCheckResult {
-	// Safe actions always pass
+	// Safe actions always pass — stop/e_stop must never be blocked
 	if safeActions[req.ActionType] {
 		return GateCheckResult{
 			Decision: "ALLOW",
@@ -106,33 +121,19 @@ func (g *SafetyGate) Check(req *ActionRequest) GateCheckResult {
 		}
 	}
 
-	// Movement action — run safety checks
-	speed := math.Max(req.SpeedMps, req.TargetSpeedMps)
+	// Movement action — build state and evaluate all rules
+	state := g.BuildStateFromAction(req)
+	result := g.EvaluateRules(state)
 
-	// 1. Speed absolute limit
-	if speed > MaxSpeedMps {
-		return GateCheckResult{
-			Decision:     "LIMIT",
-			Reason:       "speed_exceeds_max",
-			RuleID:       "SPEED-ABS",
-			AuditRef:     "ISO 3691-4:2023 S6.2.3",
-			ClampedSpeed: MaxSpeedMps,
+	// If rules passed but speed needs advisory clamping, apply it
+	if result.Decision == "ALLOW" {
+		speed := math.Max(req.SpeedMps, req.TargetSpeedMps)
+		if speed > MaxSpeedAdvisory {
+			result.ClampedSpeed = MaxSpeedAdvisory
+		} else {
+			result.ClampedSpeed = speed
 		}
 	}
 
-	// 2. Speed advisory limit
-	clampedSpeed := speed
-	if speed > MaxSpeedAdvisory {
-		clampedSpeed = MaxSpeedAdvisory
-	}
-
-	// 3. Snapshot age check (if snapshot_id present)
-	// In production: verify snapshot freshness via timestamp
-	// For now: trust the snapshot_id as proof of recent check
-
-	return GateCheckResult{
-		Decision:     "ALLOW",
-		Reason:       "passed",
-		ClampedSpeed: clampedSpeed,
-	}
+	return result
 }
