@@ -25,6 +25,7 @@ Autonomous mode:
 """
 import json
 import logging
+import math
 import os
 import subprocess
 import time
@@ -440,12 +441,22 @@ def robot_heartbeat():
     _watchdog.heartbeat()
     with _state_lock:
         state = dict(_latest_state)
+    def _safe(v):
+        """Sanitize float to avoid JSON NaN/Inf errors."""
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return 0.0
+        return v
+    cache_age = 0.0
+    try:
+        cache_age = round(_safe(_cache.last_sync_age), 1)
+    except Exception:
+        pass
     return {
         "ok": True,
         "in_fallback": _watchdog.in_fallback,
-        "battery": state.get("battery", None),
+        "battery": _safe(state.get("battery", 0)) if state.get("battery") is not None else None,
         "position": state.get("position", None),
-        "cache_age_s": round(_cache.last_sync_age, 1),
+        "cache_age_s": cache_age,
         "local_safety_active": (
             _local_behavior.is_disconnected
             if _local_behavior else False
