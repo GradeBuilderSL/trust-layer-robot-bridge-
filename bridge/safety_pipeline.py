@@ -91,13 +91,16 @@ class SafetyPipeline:
     """
 
     # Noetix N2 thresholds (used in fallback + ActionGate context)
-    MAX_SPEED_MPS     = 0.8
-    MAX_ANGULAR_RPS   = 1.0
-    BATTERY_CRITICAL  = 10.0
-    TILT_LIMIT_DEG    = 20.0
-    HUMAN_STOP_M      = 1.5
-    HUMAN_SLOW_M      = 2.5
-    HUMAN_SLOW_SPEED  = 0.3
+    # These are TIGHTER than libs/safety/safety_constants.py defaults
+    # (bridge deploys on robot — lower limits for hardware safety)
+    MAX_SPEED_MPS     = 0.8   # safety_constants: 1.2 (tighter for N2)
+    MAX_ANGULAR_RPS   = 1.0   # safety_constants: 1.5 (tighter for N2)
+    BATTERY_CRITICAL  = 10.0  # safety_constants: 5.0 (tighter: higher min)
+    TILT_LIMIT_DEG    = 20.0  # safety_constants: 25.0 (tighter: lower max)
+    HUMAN_STOP_M      = 1.5   # safety_constants: 1.5 (matches)
+    HUMAN_SLOW_M      = 2.5   # safety_constants: 2.5 (matches)
+    HUMAN_SLOW_SPEED  = 0.3   # safety_constants: 0.3 (matches)
+    OBSTACLE_STOP_M   = 0.5   # min obstacle distance for emergency stop
 
     def __init__(self):
         self._lock = threading.Lock()
@@ -369,7 +372,7 @@ class SafetyPipeline:
                 if d < min_obs_dist:
                     min_obs_dist = d
 
-        if min_obs_dist < 0.5 and speed > 0.1:
+        if min_obs_dist < self.OBSTACLE_STOP_M and speed > 0.1:
             self._stats["denied"] += 1
             self._emit("obstacle_stop", f"Препятствие в {min_obs_dist:.1f} м — остановка.")
             return 0, 0, 0, GateResult(

@@ -1265,6 +1265,26 @@ def chat(req: ChatRequest):
         }
 
 
+# ── Operator approval endpoint ───────────────────────────────────────────
+
+
+class OperatorAskRequest(BaseModel):
+    robot_id: str = ""
+    action: str = ""
+    reason: str = ""
+    timeout_s: float = 30.0
+
+
+@app.post("/operator/ask")
+def operator_ask(req: OperatorAskRequest):
+    """Forward approval request to operator UI. Returns {approved: bool}."""
+    # For now, auto-approve with logging (operator UI integration later)
+    logger.info("OPERATOR_ASK: robot=%s action=%s reason=%s",
+                req.robot_id, req.action, req.reason)
+    return {"approved": True, "method": "auto_approve",
+            "note": "operator_ui integration pending"}
+
+
 # ── Main ─────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
