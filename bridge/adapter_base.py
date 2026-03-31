@@ -10,6 +10,7 @@ Analogy from PROMPT_ROBOT_ADAPTER_SYSTEM.md:
 from __future__ import annotations
 
 import abc
+import math
 from typing import Any
 
 
@@ -85,6 +86,14 @@ class RobotAdapter(abc.ABC):
 
     name: str = "unknown"
     connected: bool = False
+
+    # Coordinate transform offsets (facility → robot local frame)
+    _x_offset: float = 0.0
+    _y_offset: float = 0.0
+    _heading_offset: float = 0.0
+
+    # Operating mode: "active", "paused", "stopped"
+    _mode: str = "active"
 
     # ── Telemetry ─────────────────────────────────────────────────────────
 
@@ -179,33 +188,88 @@ class RobotAdapter(abc.ABC):
             "note": "This adapter does not implement navigate_to",
         }
 
-    def coordinate_transform(self, facility_x: float, facility_y: float, facility_theta: float = 0.0) -> tuple:
-        """Transform facility coordinates to robot local frame.
+    def set_coordinate_offset(
+        self,
+        x_offset: float,
+        y_offset: float,
+        heading_offset: float = 0.0,
+    ) -> None:
+        """Set facility-to-robot coordinate transform parameters.
 
-        Override in subclass if robot uses different coordinate system.
-        Default: identity transform (facility = robot frame).
+        Called during calibration to define the offset+rotation between the
+        facility (venue) coordinate system and the robot's local frame.
 
-        Returns: (robot_x, robot_y, robot_theta)
+        Args:
+            x_offset      -- X translation (metres)
+            y_offset      -- Y translation (metres)
+            heading_offset -- Rotation offset (radians)
         """
-        return (facility_x, facility_y, facility_theta)
+        self._x_offset = x_offset
+        self._y_offset = y_offset
+        self._heading_offset = heading_offset
+
+    def coordinate_transform(
+        self,
+        x_facility: float,
+        y_facility: float,
+        heading_rad: float = 0.0,
+    ) -> tuple[float, float, float]:
+        """Transform facility (venue) coordinates to robot-local coordinates.
+
+        Uses offset+rotation set via set_coordinate_offset(). Compatible with
+        the OpenRMF fleet_adapter_template pattern.
+
+        Default (no offset set): identity transform.
+
+        Args:
+            x_facility   -- X in facility frame (metres)
+            y_facility   -- Y in facility frame (metres)
+            heading_rad  -- Heading in facility frame (radians)
+
+        Returns:
+            (x_robot, y_robot, heading_robot) in robot-local frame
+        """
+        # Translate
+        dx = x_facility - self._x_offset
+        dy = y_facility - self._y_offset
+        # Rotate by -heading_offset
+        cos_h = math.cos(-self._heading_offset)
+        sin_h = math.sin(-self._heading_offset)
+        x_robot = dx * cos_h - dy * sin_h
+        y_robot = dx * sin_h + dy * cos_h
+        heading_robot = heading_rad - self._heading_offset
+        return (x_robot, y_robot, heading_robot)
 
     def mode_control(self, mode: str) -> dict:
-        """Set robot operating mode.
+        """Standard mode switching compatible with OpenRMF fleet_adapter_template.
 
-        Modes: AUTOMATIC, SEMIAUTOMATIC, MANUAL, SERVICE, PAUSE
-        Mapping to Trust Layer: AUTOMATIC->FULL, SEMIAUTOMATIC->ADVISORY, MANUAL->SHADOW
+        Supported modes:
+            "pause"  -- stop movement, robot enters paused state
+            "resume" -- allow movement, robot returns to active state
+            "stop"   -- emergency stop, robot enters stopped state
 
-        Returns: {"ok": True, "mode": mode}
+        Returns:
+            {"ok": True, "mode": <new_mode>}
         """
-        mode_map = {
-            "AUTOMATIC": "FULL",
-            "SEMIAUTOMATIC": "ADVISORY",
-            "MANUAL": "SHADOW",
-            "SERVICE": "DISABLED",
-            "PAUSE": "SHADOW",
-        }
-        tl_mode = mode_map.get(mode, "ADVISORY")
-        return {"ok": True, "mode": tl_mode, "vda5050_mode": mode}
+        mode_lower = mode.lower()
+        if mode_lower == "stop":
+            self._mode = "stopped"
+            self.stop()
+        elif mode_lower == "pause":
+            self._mode = "paused"
+            self.stop()
+        elif mode_lower == "resume":
+            self._mode = "active"
+        else:
+            return {"ok": False, "error": f"Unknown mode: {mode}"}
+        return {"ok": True, "mode": self._mode}
+
+    def get_mode(self) -> str:
+        """Return current operating mode.
+
+        Returns one of: "active", "paused", "stopped"
+        """
+        return self._mode
 
     def get_lidar_scan(self) -> dict:
         """Return latest LiDAR scan data.
