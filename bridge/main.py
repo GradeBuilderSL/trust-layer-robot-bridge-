@@ -59,6 +59,8 @@ from bridge.local_cache import LocalKnowledgeCache
 
 ADAPTER_TYPE = os.getenv("ADAPTER_TYPE", "mock")
 ROBOT_URL = os.getenv("ROBOT_URL", "http://192.168.1.100:8000")
+ROBOT_NAME = os.getenv("ROBOT_NAME", "")  # Display name for UI
+ROBOT_ID = os.getenv("ROBOT_ID", "")      # Unique robot identifier
 BRIDGE_PORT = int(os.getenv("BRIDGE_PORT", "8080"))
 POLL_HZ = int(os.getenv("POLL_HZ", "10"))
 WORKSTATION_URL = os.getenv("WORKSTATION_URL", "http://localhost:8888")
@@ -361,6 +363,12 @@ def robot_state():
         entities = list(_latest_entities)
     state["entities"] = entities
     state["safety_stats"] = _pipeline.get_stats()
+    # Add robot identity for UI display
+    if ROBOT_NAME:
+        state["name"] = ROBOT_NAME
+    if ROBOT_ID:
+        state["robot_id"] = ROBOT_ID
+    state["adapter"] = ADAPTER_TYPE
     return state
 
 
