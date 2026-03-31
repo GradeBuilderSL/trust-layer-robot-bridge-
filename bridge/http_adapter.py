@@ -361,15 +361,32 @@ class HttpAdapter(RobotAdapter):
                     ty = float(pose.get("y", 0))
                     return self.navigate_to(tx, ty)
                 elif "FollowJointTrajectory" in msg_type:
-                    result = self._post("/api/joints", {"data": data})
+                    # Forward as /robot/action for G1 bridge (handles FollowJointTrajectory internally)
+                    result = self._post("/robot/action", {
+                        "action_type": "ros2_publish",
+                        "topic": params.get("topic", "/joint_trajectory"),
+                        "msg_type": msg_type,
+                        "data": data,
+                    })
+                    if result is None:
+                        # Fallback: try /api/joints for Noetix-style robots
+                        result = self._post("/api/joints", {"data": data})
                     return result or {"status": "ok", "action": "joint_trajectory"}
                 else:
                     logger.info("ros2_publish: unhandled type %s", msg_type)
                     return {"status": "ok", "note": f"ros2_publish {msg_type} not mapped for live robot"}
 
-            elif action_type in ("wave", "nod", "crouch", "stand_up", "gesture", "agree", "sit_down", "rise"):
-                # Gesture commands — send via robot gesture API if available
-                result = self._post("/api/gesture", {"gesture": action_type, "params": params})
+            elif action_type in ("wave", "nod", "crouch", "stand_up", "gesture", "agree",
+                                    "sit_down", "rise", "handshake", "dance", "spin", "bow",
+                                    "clap", "greet", "arms_up", "point_forward", "high_five",
+                                    "head_shake", "dance_with_music"):
+                # Gesture commands — try /robot/action first (G1 bridge handles internally)
+                result = self._post("/robot/action", {
+                    "action_type": action_type, "params": params,
+                })
+                if result is None:
+                    # Fallback: try /api/gesture for Noetix-style robots
+                    result = self._post("/api/gesture", {"gesture": action_type, "params": params})
                 return result or {"status": "ok", "action": action_type}
 
             elif action_type in ("gripper", "gripper_control"):

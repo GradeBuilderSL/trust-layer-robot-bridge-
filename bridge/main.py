@@ -669,6 +669,9 @@ def robot_action(req: ActionRequest):
     _delegated_actions = (
         "ros2_publish", "wave", "nod", "crouch", "stand_up",
         "gesture", "agree", "sit_down", "rise",
+        "handshake", "dance", "spin", "bow", "clap", "greet",
+        "arms_up", "point_forward", "high_five", "head_shake",
+        "dance_with_music", "point_at",
         "gripper", "gripper_control",
     )
     if atype in _delegated_actions:
