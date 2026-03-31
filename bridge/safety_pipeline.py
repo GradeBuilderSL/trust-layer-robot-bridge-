@@ -1,7 +1,7 @@
 """Local safety pipeline — runs on robot, checks every command.
 
 Phase 1: Try to load ActionGate from libs/ontology (full 131-rule set from YAML).
-         If libs not available → fall back to 6-rule built-in pipeline.
+         If libs not available → fall back to 8-rule built-in pipeline.
          Either way: fail-closed (error → DENY), binary ALLOW/DENY/LIMIT.
 
 Per STEERING.md §3: L2a deterministic, no ML, no network I/O for rules themselves.
@@ -77,6 +77,8 @@ _FALLBACK_AUDIT: dict[str, str] = {
     "SPEED-001":  "ISO 3691-4:2023 §6.2.3 (max operating speed 0.8 m/s advisory mode)",
     "ANGULAR-001":"ISO 3691-4:2023 §6.2.3 (angular velocity limit)",
     "OBS-001":    "ISO 3691-4:2023 §4.3.2 (obstacle detection and stop)",
+    "VELOCITY-POLYGON-001": "Nav2 VelocityPolygon pattern (hard stop — inside minimum zone)",
+    "VELOCITY-POLYGON-002": "Nav2 VelocityPolygon pattern (speed limited — inside expanded zone)",
 }
 
 
@@ -86,7 +88,7 @@ class SafetyPipeline:
     """Checks velocity commands against safety rules before forwarding.
 
     If ActionGate is available (libs mounted), uses full 131-rule YAML-based check.
-    Otherwise falls back to 6 built-in rules with proper audit_ref.
+    Otherwise falls back to 8 built-in rules with proper audit_ref.
     Always fail-closed: any exception → DENY.
     """
 
@@ -112,7 +114,7 @@ class SafetyPipeline:
             "limited": 0,
             "allowed": 0,
             "rules_backend": "action_gate" if _gate else "fallback_6_rules",
-            "rules_loaded": _rules_loaded if _gate else 6,
+            "rules_loaded": _rules_loaded if _gate else 8,
         }
 
     def check(
@@ -288,7 +290,7 @@ class SafetyPipeline:
         robot_state: dict,
         entities: list[dict],
     ) -> tuple[float, float, float, GateResult]:
-        """6-rule deterministic fallback. Includes audit_ref for each rule."""
+        """8-rule deterministic fallback. Includes audit_ref for each rule."""
         speed = math.hypot(vx, vy)
         battery = float(robot_state.get("battery", 100))
         tilt = float(robot_state.get("tilt_deg", 0))
@@ -382,7 +384,26 @@ class SafetyPipeline:
                 audit_ref=_FALLBACK_AUDIT["OBS-001"],
             )
 
-        # 5+6. CommandClamp (speed + angular)
+        # 5. Velocity polygon (dynamic collision zone)
+        vp_result = self._check_velocity_polygon(speed, robot_state, entities)
+        if vp_result is not None:
+            vp_vx, vp_vy, vp_wz, vp_gate = vp_result
+            if vp_gate.decision == "DENY":
+                self._stats["denied"] += 1
+                self._emit("velocity_polygon_deny", vp_gate.reason)
+                return vp_vx, vp_vy, vp_wz, vp_gate
+            elif vp_gate.decision == "LIMIT":
+                # Scale velocity to max safe speed
+                max_safe = vp_gate.params.get("max_speed_mps", speed)
+                if speed > 0:
+                    scale = max_safe / speed
+                    vx *= scale
+                    vy *= scale
+                self._stats["limited"] += 1
+                self._emit("velocity_polygon_limit", vp_gate.reason)
+                return vx, vy, wz, vp_gate
+
+        # 6+7. CommandClamp (speed + angular)
         vx, vy, wz, clamp_result = self._apply_command_clamp(vx, vy, wz, speed)
         if clamp_result.decision == "LIMIT":
             self._stats["limited"] += 1
@@ -398,6 +419,44 @@ class SafetyPipeline:
                 5.0,
             )
         return vx, vy, wz, GateResult(decision="ALLOW")
+
+    # ── Velocity polygon (dynamic collision zone) ─────────────────────────
+
+    def _check_velocity_polygon(self, speed_mps, robot_state, entities):
+        """Velocity-aware collision zone check (Nav2 VelocityPolygon pattern).
+
+        Faster speed → larger safety zone radius.
+        Zone radius = base_radius + speed * expansion_factor
+        """
+        BASE_RADIUS_M = 0.3  # Minimum zone radius at rest
+        EXPANSION_FACTOR = 1.5  # meters per m/s (at 0.8 m/s → 1.5m total zone)
+
+        zone_radius = BASE_RADIUS_M + speed_mps * EXPANSION_FACTOR
+
+        # Check all entities against dynamic zone
+        for entity in entities:
+            dist = float(entity.get("distance_m", 999))
+            if dist < zone_radius:
+                # Entity inside velocity-expanded zone
+                if dist < BASE_RADIUS_M:
+                    # Too close even at rest — hard stop
+                    return 0.0, 0.0, 0.0, GateResult(
+                        decision="DENY",
+                        reason=f"Entity at {dist:.1f}m inside minimum zone ({BASE_RADIUS_M}m)",
+                        rule_id="VELOCITY-POLYGON-001",
+                        audit_ref=_FALLBACK_AUDIT["VELOCITY-POLYGON-001"],
+                    )
+                else:
+                    # Inside expanded zone — reduce speed so zone shrinks to fit
+                    max_safe_speed = (dist - BASE_RADIUS_M) / EXPANSION_FACTOR
+                    return max_safe_speed, None, None, GateResult(
+                        decision="LIMIT",
+                        reason=f"Entity at {dist:.1f}m, speed limited to {max_safe_speed:.2f} m/s",
+                        rule_id="VELOCITY-POLYGON-002",
+                        audit_ref=_FALLBACK_AUDIT["VELOCITY-POLYGON-002"],
+                        params={"max_speed_mps": max_safe_speed},
+                    )
+        return None  # No velocity polygon violation
 
     # ── Reasoning + stats ─────────────────────────────────────────────────
 
