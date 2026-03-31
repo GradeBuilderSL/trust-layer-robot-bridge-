@@ -108,8 +108,8 @@ def _push_decision(robot_id: str, command: str, gate) -> None:
                 method="POST",
             )
             urllib.request.urlopen(req, timeout=1.0)
-        except Exception:
-            pass  # never block the safety path
+        except Exception as _exc:
+            logger.debug("Decision log push ignored: %s", _exc)
 
     threading.Thread(target=_post, daemon=True).start()
 
@@ -201,8 +201,8 @@ def _poller():
             with _state_lock:
                 _latest_state    = state
                 _latest_entities = entities
-        except Exception:
-            pass
+        except Exception as _exc:
+            logger.debug("State poll ignored: %s", _exc)
         time.sleep(dt)
 
 
@@ -449,8 +449,8 @@ def robot_heartbeat():
     cache_age = 0.0
     try:
         cache_age = round(_safe(_cache.last_sync_age), 1)
-    except Exception:
-        pass
+    except Exception as _exc:
+        logger.debug("Ignored: %s", _exc)
     return {
         "ok": True,
         "in_fallback": _watchdog.in_fallback,
