@@ -596,6 +596,33 @@ def robot_action(req: ActionRequest):
             "action_type": atype,
         }
 
+    # ── move (direct velocity) ───────────────────────────────────────────
+    if atype == "move":
+        vx = float((req.params or {}).get("vx", 0))
+        vy = float((req.params or {}).get("vy", 0))
+        wz = float((req.params or {}).get("wz", 0))
+        speed = float((req.params or {}).get("speed_mps", (req.params or {}).get("speed", 0.3)))
+
+        with _state_lock:
+            state = dict(_latest_state)
+            entities = list(_latest_entities)
+
+        _, _, _, gate = _pipeline.check(speed, 0.0, 0.0, state, entities)
+        robot_id = state.get("robot_id", req.robot_id or f"bridge-{ADAPTER_TYPE}")
+        _push_decision(robot_id, f"move vx={vx:.2f} wz={wz:.2f}", gate)
+
+        if gate.decision == "DENY":
+            return {
+                "status": "denied", "action_id": req.action_id,
+                "action_type": atype, "reason": gate.reason, "rule_id": gate.rule_id,
+            }
+
+        send_result = _adapter.send_velocity(vx, vy, wz)
+        return {
+            "status": "ok", "action_id": req.action_id,
+            "action_type": atype, "result": send_result,
+        }
+
     # ── navigate_to ───────────────────────────────────────────────────────
     if atype == "navigate_to":
         pos = req.target_position or {}
