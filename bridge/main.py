@@ -310,6 +310,7 @@ class MoveRequest(BaseModel):
 
 
 class ActionRequest(BaseModel):
+    model_config = {"extra": "allow"}  # Accept unknown fields (vx, vy, wz from gateway)
     action_id: str = ""
     action_type: str
     robot_id: str = ""
@@ -326,6 +327,12 @@ class ActionRequest(BaseModel):
     timing: str = "once"
     source: str = ""
     trace_id: str = ""
+    # Velocity fields (from _bridge_velocity_via_action)
+    vx: float = 0.0
+    vy: float = 0.0
+    wz: float = 0.0
+    speed: float = 0.0
+    speed_mps: float = 0.0
 
 
 class ScenarioRequest(BaseModel):
@@ -598,10 +605,11 @@ def robot_action(req: ActionRequest):
 
     # ── move (direct velocity) ───────────────────────────────────────────
     if atype == "move":
-        vx = float((req.params or {}).get("vx", 0))
-        vy = float((req.params or {}).get("vy", 0))
-        wz = float((req.params or {}).get("wz", 0))
-        speed = float((req.params or {}).get("speed_mps", (req.params or {}).get("speed", 0.3)))
+        # vx/vy/wz from top-level fields or params dict
+        vx = req.vx or float((req.params or {}).get("vx", 0))
+        vy = req.vy or float((req.params or {}).get("vy", 0))
+        wz = req.wz or float((req.params or {}).get("wz", 0))
+        speed = req.speed_mps or req.speed or req.target_speed_mps or float((req.params or {}).get("speed", 0.3))
 
         with _state_lock:
             state = dict(_latest_state)
