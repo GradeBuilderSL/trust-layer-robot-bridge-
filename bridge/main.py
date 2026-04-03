@@ -36,7 +36,7 @@ from typing import Optional
 
 logger = logging.getLogger("bridge")
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -53,6 +53,23 @@ from bridge.watchdog import EdgeWatchdog
 from bridge.local_behavior import LocalBehaviorManager
 from bridge.local_navigator import LocalNavigator
 from bridge.local_cache import LocalKnowledgeCache
+
+
+# ── Trace logging (distributed tracing) ─────────────────────────────────
+
+_trace_logger = logging.getLogger("trace")
+
+
+def _trace_log(operation: str, trace_id: str = "no-trace", **kwargs):
+    """Emit structured trace log entry."""
+    entry = {
+        "trace_id": trace_id,
+        "service": "bridge",
+        "operation": operation,
+        "timestamp": int(time.time() * 1000),
+        **kwargs,
+    }
+    _trace_logger.info(json.dumps(entry, ensure_ascii=False))
 
 
 # ── Configuration ────────────────────────────────────────────────────────
@@ -76,10 +93,12 @@ WATCHDOG_TIMEOUT_MS = int(os.getenv("WATCHDOG_TIMEOUT_MS", "800"))
 
 # ── Decision log push ─────────────────────────────────────────────────────
 
-def _push_decision(robot_id: str, command: str, gate) -> None:
+def _push_decision(robot_id: str, command: str, gate, trace_id: str = "") -> None:
     """Push GateResult to central decision_log asynchronously (fire-and-forget)."""
     if not DECISION_LOG_URL:
         return
+    if trace_id:
+        logger.debug("push_decision trace_id=%s cmd=%s decision=%s", trace_id, command, gate.decision)
     audit_ref = getattr(gate, "audit_ref", "") or "ISO 3691-4:2023"
     packet = {
         "robot_id": robot_id,
@@ -380,8 +399,11 @@ def robot_state():
 
 
 @app.post("/robot/move")
-def robot_move(req: MoveRequest):
+def robot_move(req: MoveRequest, request: Request = None):
     """Send velocity command through safety pipeline."""
+    trace_id = (request.headers.get("x-trace-id", "no-trace") if request else "no-trace")
+    _trace_log("robot_move", trace_id=trace_id, vx=req.vx, vy=req.vy, wz=req.wz)
+
     if not _adapter:
         raise HTTPException(503, "Adapter not initialized")
 
@@ -415,7 +437,8 @@ def robot_move(req: MoveRequest):
     # Push every decision to central decision_log (async, non-blocking)
     robot_id = state.get("robot_id", state.get("name", f"bridge-{ADAPTER_TYPE}"))
     cmd_str = f"move vx={req.vx:.2f} vy={req.vy:.2f} wz={req.wz:.2f}"
-    _push_decision(robot_id, cmd_str, gate)
+    _push_decision(robot_id, cmd_str, gate, trace_id=trace_id)
+    _trace_log("safety_check", trace_id=trace_id, action="move", decision=gate.decision, rule_id=gate.rule_id)
 
     result = {
         "requested": {"vx": req.vx, "vy": req.vy, "wz": req.wz},
@@ -441,8 +464,11 @@ def robot_move(req: MoveRequest):
 
 
 @app.post("/robot/stop")
-def robot_stop():
+def robot_stop(request: Request = None):
     """Emergency stop."""
+    trace_id = (request.headers.get("x-trace-id", "no-trace") if request else "no-trace")
+    _trace_log("robot_stop", trace_id=trace_id)
+
     if not _adapter:
         raise HTTPException(503, "Adapter not initialized")
     _watchdog.heartbeat()  # operator is present
@@ -554,7 +580,7 @@ class _AllowGate:
 
 
 @app.post("/robot/action")
-def robot_action(req: ActionRequest):
+def robot_action(req: ActionRequest, request: Request = None):
     """Execute a StandardAction on the robot.
 
     Dispatches by action_type:
@@ -564,6 +590,9 @@ def robot_action(req: ActionRequest):
       scan            — camera capture
     All movement actions run through the safety pipeline.
     """
+    trace_id = (request.headers.get("x-trace-id", "no-trace") if request else "no-trace")
+    _trace_log("robot_action", trace_id=trace_id, action_type=req.action_type, robot_id=req.robot_id or "")
+
     if not _adapter:
         raise HTTPException(503, "Adapter not initialized")
 
@@ -587,6 +616,7 @@ def robot_action(req: ActionRequest):
             req.robot_id or f"bridge-{ADAPTER_TYPE}",
             f"action:{atype}",
             _AllowGate(),
+            trace_id=trace_id,
         )
         return {
             "status": "ok",
@@ -617,7 +647,8 @@ def robot_action(req: ActionRequest):
 
         _, _, _, gate = _pipeline.check(speed, 0.0, 0.0, state, entities)
         robot_id = state.get("robot_id", req.robot_id or f"bridge-{ADAPTER_TYPE}")
-        _push_decision(robot_id, f"move vx={vx:.2f} wz={wz:.2f}", gate)
+        _push_decision(robot_id, f"move vx={vx:.2f} wz={wz:.2f}", gate, trace_id=trace_id)
+        _trace_log("safety_check", trace_id=trace_id, action="move", decision=gate.decision, rule_id=gate.rule_id)
 
         if gate.decision == "DENY":
             return {
@@ -626,6 +657,7 @@ def robot_action(req: ActionRequest):
             }
 
         send_result = _adapter.send_velocity(vx, vy, wz)
+        _trace_log("adapter_send", trace_id=trace_id, action="move", result=str(send_result)[:200])
         return {
             "status": "ok", "action_id": req.action_id,
             "action_type": atype, "result": send_result,
@@ -647,8 +679,10 @@ def robot_action(req: ActionRequest):
             "robot_id", req.robot_id or f"bridge-{ADAPTER_TYPE}"
         )
         _push_decision(
-            robot_id, f"action:navigate_to ({x_m:.1f},{y_m:.1f})", gate
+            robot_id, f"action:navigate_to ({x_m:.1f},{y_m:.1f})", gate,
+            trace_id=trace_id,
         )
+        _trace_log("safety_check", trace_id=trace_id, action="navigate_to", decision=gate.decision, rule_id=gate.rule_id)
 
         if gate.decision == "DENY":
             return {
@@ -729,7 +763,7 @@ def robot_action(req: ActionRequest):
                 result = _adapter.handle_action(atype, action_params)
             except Exception as exc:
                 logger.warning("handle_action(%s) failed: %s", atype, exc)
-                result = {"status": "ok", "error": str(exc)}
+                result = {"status": "error", "error": str(exc)}
         else:
             # Adapter doesn't support handle_action — accept silently
             result = {"status": "ok", "note": f"{atype} accepted (adapter has no handler)"}
@@ -738,6 +772,7 @@ def robot_action(req: ActionRequest):
             req.robot_id or f"bridge-{ADAPTER_TYPE}",
             f"action:{atype}",
             _AllowGate(),
+            trace_id=trace_id,
         )
         return {
             "status": "ok",
