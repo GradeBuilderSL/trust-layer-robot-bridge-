@@ -135,6 +135,20 @@ _poller_thread: threading.Thread | None = None
 _running = False
 _start_time = time.time()
 
+
+def _json_safe_deep(obj):
+    """Replace NaN/Inf floats recursively so JSON responses never raise ValueError."""
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return 0.0
+        return obj
+    if isinstance(obj, dict):
+        return {k: _json_safe_deep(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_json_safe_deep(v) for v in obj]
+    return obj
+
+
 _chat_history: list[dict] = []
 _chat_history_lock = threading.Lock()
 _CHAT_HISTORY_MAX = 100
@@ -456,27 +470,28 @@ def robot_heartbeat():
     _watchdog.heartbeat()
     with _state_lock:
         state = dict(_latest_state)
-    def _safe(v):
-        """Sanitize float to avoid JSON NaN/Inf errors."""
-        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
-            return 0.0
-        return v
     cache_age = 0.0
     try:
-        cache_age = round(_safe(_cache.last_sync_age), 1)
+        cache_age = round(_json_safe_deep(_cache.last_sync_age), 1)
     except Exception as _exc:
         logger.debug("Ignored: %s", _exc)
-    return {
+    bat = state.get("battery")
+    if bat is not None:
+        bat = _json_safe_deep(bat)
+    pos = state.get("position")
+    if pos is not None:
+        pos = _json_safe_deep(pos)
+    return _json_safe_deep({
         "ok": True,
         "in_fallback": _watchdog.in_fallback,
-        "battery": _safe(state.get("battery", 0)) if state.get("battery") is not None else None,
-        "position": state.get("position", None),
+        "battery": bat,
+        "position": pos,
         "cache_age_s": cache_age,
         "local_safety_active": (
             _local_behavior.is_disconnected
             if _local_behavior else False
         ),
-    }
+    })
 
 
 @app.get("/robot/local_behavior")
