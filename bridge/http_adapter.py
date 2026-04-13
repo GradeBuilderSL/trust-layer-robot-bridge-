@@ -149,9 +149,9 @@ class HttpAdapter(RobotAdapter):
             # Isaac Sim: POST /control/move {"vx", "vy", "wz"}
             result = self._post("/control/move", {"vx": vx, "vy": vy, "wz": wz})
         else:
-            # Noetix N2: POST /api/cmd/velocity?vx=...&vy=...&wz=...
+            # Noetix N2 — non-holonomic, vy not supported
             result = self._post(
-                f"/api/cmd/velocity?vx={vx:.3f}&vy={vy:.3f}&wz={wz:.3f}", {}
+                f"/api/cmd/velocity?vx={vx:.3f}&vy=0.000&wz={wz:.3f}", {}
             )
 
         if result is not None:
@@ -260,8 +260,22 @@ class HttpAdapter(RobotAdapter):
                 if "json" not in ct and "text/html" in ct:
                     return None  # HTML page, not JSON API
                 return json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            # 404 = endpoint not implemented by this bridge — not a connectivity loss.
+            self._last_error = f"http:{e.code}"
+            if e.code != 404:
+                self.connected = False
+            return None
+        except urllib.error.URLError as e:
+            self._last_error = f"network:{e}"
+            self.connected = False
+            return None
+        except json.JSONDecodeError as e:
+            self._last_error = f"json:{e}"
+            self.connected = False
+            return None
         except Exception as e:
-            self._last_error = str(e)
+            self._last_error = f"unknown:{e}"
             self.connected = False
             return None
 
@@ -275,8 +289,16 @@ class HttpAdapter(RobotAdapter):
             )
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 return json.loads(resp.read())
+        except urllib.error.URLError as e:
+            self._last_error = f"network:{e}"
+            self.connected = False
+            return None
+        except json.JSONDecodeError as e:
+            self._last_error = f"json:{e}"
+            self.connected = False
+            return None
         except Exception as e:
-            self._last_error = str(e)
+            self._last_error = f"unknown:{e}"
             self.connected = False
             return None
 
@@ -369,7 +391,7 @@ class HttpAdapter(RobotAdapter):
                         "data": data,
                     })
                     if result is None:
-                        # Fallback: try /api/joints for Noetix-style robots
+                        logger.info("FollowJointTrajectory /robot/action failed, trying /api/joints fallback")
                         result = self._post("/api/joints", {"data": data})
                     return result or {"status": "ok", "action": "joint_trajectory"}
                 else:
