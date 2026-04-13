@@ -8,6 +8,7 @@ Adapter types (ADAPTER_TYPE env var):
   mock  — simulated Noetix N2 (default, no hardware needed)
   http  — real Noetix N2 via HTTP API
   h1    — Unitree H1 humanoid via h1_server.py on onboard PC
+  e1    — Noetix E1 humanoid via e1_server.py on onboard Jetson Orin Nano Super
 
 Quick-start for H1:
   1. On H1:     ssh unitree@192.168.123.1 "python -m bridge.h1_server"
@@ -28,6 +29,7 @@ import logging
 import math
 import os
 import subprocess
+import sys
 import time
 import threading
 import urllib.request
@@ -44,6 +46,159 @@ from bridge.adapter_base import RobotAdapter, normalize_capabilities
 from bridge.mock_adapter import MockAdapter
 from bridge.http_adapter import HttpAdapter
 from bridge.h1_adapter import H1Adapter
+from bridge.e1_adapter import E1Adapter
+
+# Tier taxonomy (T0/T1/T2/T3) — lives in libs/safety/tiers.py. Fail-open so
+# bridges without libs/ mounted still work.
+try:
+    _LIBS_DIR = os.environ.get("TRUST_LAYER_LIBS", "/app/libs")
+    if _LIBS_DIR not in sys.path:
+        sys.path.insert(0, _LIBS_DIR)
+    from safety.tiers import (  # type: ignore[import-not-found]
+        assign_tier, tier_requires_approval, tier_requires_quorum,
+        T0_OBSERVE, T1_PREPARE, T2_ACT, T3_COMMIT,
+    )
+    # Ed25519 capability tokens (SINT-style). Optional — bridges without
+    # CAPABILITY_TOKENS_REQUIRED=1 still accept unsigned requests for
+    # backwards compatibility.
+    from safety.capability_tokens import (  # type: ignore[import-not-found]
+        Ed25519TokenVerifier, CapabilityToken, RevocationStore,
+    )
+    # Agent trust tracker feeds Δ_trust into tier_ctx so the same tier
+    # taxonomy escalates misbehaving agents automatically.
+    from safety.agent_trust import AgentTrustTracker  # type: ignore[import-not-found]
+    from safety.forbidden_combos import ForbiddenCombosDetector  # type: ignore[import-not-found]
+    _TIERS_LOADED = True
+except Exception as _tier_exc:
+    _TIERS_LOADED = False
+    T0_OBSERVE = "T0_OBSERVE"; T1_PREPARE = "T1_PREPARE"
+    T2_ACT = "T2_ACT"; T3_COMMIT = "T3_COMMIT"
+
+    def assign_tier(action_type, *, resource="", context=None):  # type: ignore[misc]
+        class _Fallback:
+            tier = T2_ACT
+            base_tier = T2_ACT
+            escalations: list = []
+            reason = "tiers lib not loaded"
+            def to_dict(self):
+                return {"tier": self.tier, "base_tier": self.base_tier,
+                        "escalations": [], "reason": self.reason}
+        return _Fallback()
+
+    def tier_requires_approval(tier):  # type: ignore[misc]
+        return tier in (T2_ACT, T3_COMMIT)
+
+    def tier_requires_quorum(tier):  # type: ignore[misc]
+        return tier == T3_COMMIT
+
+    Ed25519TokenVerifier = None  # type: ignore[misc,assignment]
+    CapabilityToken = None  # type: ignore[misc,assignment]
+    RevocationStore = None  # type: ignore[misc,assignment]
+    AgentTrustTracker = None  # type: ignore[misc,assignment]
+    ForbiddenCombosDetector = None  # type: ignore[misc,assignment]
+
+
+# ── Shared trust tracker + forbidden-combo detector ───────────────────────
+_trust_tracker = AgentTrustTracker() if AgentTrustTracker is not None else None
+_forbidden_combos = ForbiddenCombosDetector() if ForbiddenCombosDetector is not None else None
+
+
+# ── Capability token verifier state ───────────────────────────────────────
+#
+# Bridges start with CAPABILITY_TOKENS_REQUIRED=0 (backwards compatible). When
+# set to 1, every /robot/move, /robot/action, /robot/stop must carry a valid
+# X-Capability-Token header. Key material is fetched from license_service
+# /v1/tokens/public_key at startup; if that fails and we're in required
+# mode, bridge fails closed.
+CAPABILITY_TOKENS_REQUIRED = os.getenv("CAPABILITY_TOKENS_REQUIRED", "0") == "1"
+LICENSE_SERVICE_URL = os.getenv("LICENSE_SERVICE_URL", "http://license_service:9600")
+_token_verifier = None
+_token_revocations = None
+
+
+def _init_token_verifier() -> None:
+    """Fetch the issuer's public key from license_service and build a verifier."""
+    global _token_verifier, _token_revocations
+    if Ed25519TokenVerifier is None:
+        return
+    _token_revocations = RevocationStore()
+    try:
+        req = urllib.request.Request(
+            f"{LICENSE_SERVICE_URL.rstrip('/')}/v1/tokens/public_key",
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=3.0) as resp:
+            data = json.loads(resp.read())
+    except Exception as exc:
+        if CAPABILITY_TOKENS_REQUIRED:
+            logger.error(
+                "capability tokens REQUIRED but license_service public key unreachable (%s) — fail-closed",
+                exc,
+            )
+        else:
+            logger.info(
+                "capability tokens optional — license_service key unreachable (%s), running without verifier",
+                exc,
+            )
+        return
+
+    try:
+        import base64
+        pub_b64 = data.get("public_key_b64", "")
+        padding = "=" * (-len(pub_b64) % 4)
+        pub_bytes = base64.urlsafe_b64decode(pub_b64 + padding)
+        _token_verifier = Ed25519TokenVerifier(
+            trusted_issuers={"license_service": pub_bytes},
+            revocations=_token_revocations,
+        )
+        logger.info(
+            "capability tokens: verifier ready (issuer=license_service, required=%s)",
+            CAPABILITY_TOKENS_REQUIRED,
+        )
+    except Exception as exc:
+        logger.error("capability tokens: verifier init failed: %s", exc)
+
+
+def _verify_capability_token(
+    request: "Request | None",
+    resource: str,
+    action: str,
+    physical: dict,
+) -> tuple[bool, str, dict]:
+    """Return (ok, reason, token_info). Fail-open when tokens are optional
+    and no header is present; fail-closed otherwise.
+    """
+    if not CAPABILITY_TOKENS_REQUIRED and _token_verifier is None:
+        return True, "tokens-disabled", {}
+    if request is None:
+        return (not CAPABILITY_TOKENS_REQUIRED), "no-request-object", {}
+
+    header = request.headers.get("x-capability-token", "") if request else ""
+    if not header:
+        if CAPABILITY_TOKENS_REQUIRED:
+            return False, "missing X-Capability-Token header", {}
+        return True, "no-token-optional-mode", {}
+
+    if _token_verifier is None:
+        return (not CAPABILITY_TOKENS_REQUIRED), "verifier not initialised", {}
+
+    try:
+        tok = CapabilityToken.decode(header)
+    except Exception as exc:
+        return False, f"bad token encoding: {exc}", {}
+
+    ok, reason = _token_verifier.verify(
+        tok,
+        request={"resource": resource, "action": action, "physical": physical},
+    )
+    info = {
+        "token_id": tok.token_id,
+        "subject": tok.subject,
+        "expires_at": tok.expires_at,
+        "resources": list(tok.resources),
+        "actions": list(tok.actions),
+    }
+    return ok, reason, info
 from bridge.safety_pipeline import SafetyPipeline
 from bridge.license_manager import LicenseManager
 from bridge.local_brain import LocalBrain
@@ -78,6 +233,15 @@ ADAPTER_TYPE = os.getenv("ADAPTER_TYPE", "mock")
 ROBOT_URL = os.getenv("ROBOT_URL", "http://192.168.1.100:8000")
 ROBOT_NAME = os.getenv("ROBOT_NAME", "")  # Display name for UI
 ROBOT_ID = os.getenv("ROBOT_ID", "")      # Unique robot identifier
+# robot_model surfaced to operator_ui /api/fleet. Falls back to a per-adapter
+# default so the operator sees "Noetix E1" instead of "—" without extra config.
+_DEFAULT_MODELS = {
+    "mock": "Mock (Noetix N2 sim)",
+    "http": "Noetix N2",
+    "h1":   "Unitree H1",
+    "e1":   "Noetix E1",
+}
+ROBOT_MODEL = os.getenv("ROBOT_MODEL", _DEFAULT_MODELS.get(ADAPTER_TYPE, ADAPTER_TYPE))
 BRIDGE_PORT = int(os.getenv("BRIDGE_PORT", "8080"))
 POLL_HZ = int(os.getenv("POLL_HZ", "10"))
 WORKSTATION_URL = os.getenv("WORKSTATION_URL", "http://localhost:8888")
@@ -93,7 +257,7 @@ WATCHDOG_TIMEOUT_MS = int(os.getenv("WATCHDOG_TIMEOUT_MS", "800"))
 
 # ── Decision log push ─────────────────────────────────────────────────────
 
-def _push_decision(robot_id: str, command: str, gate, trace_id: str = "") -> None:
+def _push_decision(robot_id: str, command: str, gate, trace_id: str = "", tier: str = "") -> None:
     """Push GateResult to central decision_log asynchronously (fire-and-forget)."""
     if not DECISION_LOG_URL:
         return
@@ -113,6 +277,7 @@ def _push_decision(robot_id: str, command: str, gate, trace_id: str = "") -> Non
         "rationale": gate.reason or "OK",
         "standard": audit_ref,
         "audit_ref": audit_ref,
+        "tier": tier or "",
         "ts": time.time(),
         "timestamp_ms": int(time.time() * 1000),
         "source": "robot_bridge",
@@ -207,6 +372,9 @@ def _create_adapter():
     if ADAPTER_TYPE == "h1":
         h1_url = os.getenv("ROBOT_URL", "http://192.168.123.1:8081")
         return H1Adapter(robot_url=h1_url)
+    if ADAPTER_TYPE == "e1":
+        e1_url = os.getenv("ROBOT_URL", "http://192.168.55.101:8083")
+        return E1Adapter(robot_url=e1_url)
     return MockAdapter()
 
 
@@ -282,6 +450,10 @@ async def lifespan(app: FastAPI):
         on_mode_change=_on_mode_change,
     )
     _connectivity.start()
+
+    # 4b. Initialise Ed25519 capability-token verifier (SINT-style).
+    # Fail-closed only when CAPABILITY_TOKENS_REQUIRED=1.
+    _init_token_verifier()
 
     # 5. Start EdgeWatchdog (200ms heartbeat, 800ms → SAFE_FALLBACK)
     _watchdog.start()
@@ -395,6 +567,7 @@ def robot_state():
     if ROBOT_ID:
         state["robot_id"] = ROBOT_ID
     state["adapter"] = ADAPTER_TYPE
+    state.setdefault("robot_model", ROBOT_MODEL)
     return state
 
 
@@ -406,6 +579,42 @@ def robot_move(req: MoveRequest, request: Request = None):
 
     if not _adapter:
         raise HTTPException(503, "Adapter not initialized")
+
+    # ── Ed25519 capability-token verification (SINT-style) ───────────────
+    tok_ok, tok_reason, tok_info = _verify_capability_token(
+        request,
+        resource="ros2:///cmd_vel",
+        action="publish",
+        physical={
+            "velocity_mps": math.hypot(req.vx, req.vy),
+            "force_n": 0.0,
+        },
+    )
+    if not tok_ok:
+        _trace_log("cap_token_deny", trace_id=trace_id, reason=tok_reason)
+        class _TokenDeny:
+            decision = "DENY"
+            reason = f"capability token: {tok_reason}"
+            rule_id = "CAP-TOKEN-001"
+            audit_ref = "SINT-inspired Ed25519 capability token"
+            params: dict = {}
+        _push_decision(
+            f"bridge-{ADAPTER_TYPE}", "move (cap_token_deny)",
+            _TokenDeny(), trace_id=trace_id, tier=T2_ACT,
+        )
+        return {
+            "requested": {"vx": req.vx, "vy": req.vy, "wz": req.wz},
+            "applied": {"vx": 0.0, "vy": 0.0, "wz": 0.0},
+            "gate": {
+                "decision": "DENY",
+                "reason": f"capability token: {tok_reason}",
+                "rule_id": "CAP-TOKEN-001",
+                "audit_ref": "SINT-inspired Ed25519 capability token",
+                "params": {},
+            },
+            "send": {"status": "denied_cap_token"},
+            "tier": T2_ACT,
+        }
 
     # Register heartbeat — upstream is alive
     _watchdog.heartbeat()
@@ -456,9 +665,13 @@ def robot_move(req: MoveRequest, request: Request = None):
     if gate.decision != "DENY":
         send_result = _adapter.send_velocity(vx, vy, wz)
         result["send"] = send_result
+        if _trust_tracker is not None:
+            _trust_tracker.record(robot_id, "clean_action", f"move vx={vx:.2f}")
     else:
         _adapter.stop()
         result["send"] = {"status": "denied_stop"}
+        if _trust_tracker is not None:
+            _trust_tracker.record(robot_id, "deny_action", gate.reason or "denied")
 
     return result
 
@@ -567,6 +780,32 @@ def pipeline_stats():
     return _pipeline.get_stats()
 
 
+@app.get("/agent/trust")
+def agent_trust_snapshot():
+    """Per-agent trust scores from the behavioural tracker (SINT-inspired)."""
+    if _trust_tracker is None:
+        return {"available": False, "reason": "trust tracker not loaded"}
+    return {"available": True, "agents": _trust_tracker.snapshot()}
+
+
+@app.get("/agent/trust/{agent_id}")
+def agent_trust_one(agent_id: str):
+    if _trust_tracker is None:
+        return {"available": False}
+    st = _trust_tracker.state(agent_id)
+    if st is None:
+        return {"available": True, "agent_id": agent_id, "score": None}
+    return {"available": True, **st.to_dict()}
+
+
+@app.post("/agent/trust/{agent_id}/reset")
+def agent_trust_reset(agent_id: str):
+    if _trust_tracker is None:
+        raise HTTPException(503, "trust tracker not loaded")
+    _trust_tracker.record(agent_id, "operator_reset", "manual reset")
+    return {"ok": True, "score": _trust_tracker.score(agent_id)}
+
+
 # ── Action endpoint ──────────────────────────────────────────────────────
 
 
@@ -605,9 +844,72 @@ def robot_action(req: ActionRequest, request: Request = None):
             "action_type": req.action_type,
             "reason": "SAFE_FALLBACK active — restore heartbeat first",
             "rule_id": "WATCHDOG-FALLBACK",
+            "tier": T2_ACT,
         }
 
     atype = req.action_type
+
+    # ── Tier assignment (SINT-inspired T0/T1/T2/T3) ──────────────────────
+    # Pulls human proximity, running-mode flags, and per-agent trust score
+    # out of latest state + AgentTrustTracker so tier escalation is fully
+    # driven by live signals.
+    tier_ctx: dict = {}
+    with _state_lock:
+        _st = dict(_latest_state)
+        _ents = list(_latest_entities)
+    _humans = [e for e in _ents if e.get("is_human") or e.get("class_name") == "person"]
+    if _humans:
+        try:
+            tier_ctx["human_distance_m"] = min(
+                float(e.get("distance_m", 999)) for e in _humans
+            )
+        except (TypeError, ValueError):
+            pass
+    if _st.get("mode_e1") == "running" or _st.get("gait") == "RUN":
+        tier_ctx["running_mode"] = True
+
+    # Δ_trust feed from AgentTrustTracker. The request's subject comes from
+    # either the capability token (preferred) or the fallback robot_id.
+    _agent_id = req.robot_id or f"bridge-{ADAPTER_TYPE}"
+    if _trust_tracker is not None:
+        tier_ctx["trust"] = _trust_tracker.score(_agent_id)
+
+    _tier_info = assign_tier(atype, context=tier_ctx)
+
+    # ── Forbidden-combo sliding-window check ─────────────────────────────
+    if _forbidden_combos is not None and atype not in ("stop", "e_stop", "idle", "wait"):
+        _combo_ok, _violated = _forbidden_combos.check(
+            _agent_id, atype,
+            params=dict(req.params or {}),
+        )
+        if not _combo_ok:
+            if _trust_tracker is not None:
+                _trust_tracker.record(_agent_id, "forbidden_combo", _violated.name)
+            class _ComboDeny:
+                decision = "DENY"
+                reason = f"forbidden combo: {_violated.name} ({_violated.description})"
+                rule_id = f"COMBO-{_violated.name.upper()}"
+                audit_ref = _violated.audit_ref or "forbidden-combo"
+                params: dict = {}
+            _push_decision(
+                _agent_id, f"action:{atype}",
+                _ComboDeny(), trace_id=trace_id, tier=_tier_info.tier,
+            )
+            return {
+                "status": "denied",
+                "action_id": req.action_id,
+                "action_type": atype,
+                "reason": _ComboDeny.reason,
+                "rule_id": _ComboDeny.rule_id,
+                "tier": _tier_info.tier,
+                "tier_info": _tier_info.to_dict(),
+            }
+        # Record the action only if it passed the combo check.
+        _forbidden_combos.record(_agent_id, atype, params=dict(req.params or {}))
+    _trace_log("tier_assigned", trace_id=trace_id,
+               action_type=atype, tier=_tier_info.tier,
+               base_tier=_tier_info.base_tier,
+               escalations=len(_tier_info.escalations))
 
     # ── stop / e_stop ────────────────────────────────────────────────────
     if atype in ("stop", "e_stop"):
@@ -617,12 +919,15 @@ def robot_action(req: ActionRequest, request: Request = None):
             f"action:{atype}",
             _AllowGate(),
             trace_id=trace_id,
+            tier=_tier_info.tier,
         )
         return {
             "status": "ok",
             "action_id": req.action_id,
             "action_type": atype,
             "result": result,
+            "tier": _tier_info.tier,
+            "tier_info": _tier_info.to_dict(),
         }
 
     # ── wait / idle ───────────────────────────────────────────────────────
