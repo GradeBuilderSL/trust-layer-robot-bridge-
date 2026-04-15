@@ -91,6 +91,14 @@ class HttpAdapter(RobotAdapter):
             self.connected = True
             pos = data.get("position", {})
             vel = data.get("velocity", {})
+            # Forward joint_positions when the upstream bridge supplies
+            # them. Trust Layer's task_executor uses joint_positions to
+            # detect motion when base odometry is missing — without
+            # this passthrough every walking command would report
+            # "Δjoints=0.00" and the operator would think the robot
+            # didn't move even when its legs were stepping.
+            joint_positions = data.get("joint_positions") or []
+            joint_names = data.get("joint_names") or []
             return {
                 "position": {
                     "x": float(pos.get("x", 0)),
@@ -111,6 +119,8 @@ class HttpAdapter(RobotAdapter):
                 "mode": data.get("mode", "ADVISORY"),
                 "timestamp_s": time.time(),
                 "adapter": "http",
+                "joint_positions": [float(j) for j in joint_positions],
+                "joint_names": list(joint_names),
             }
         else:
             # Noetix N2 format
