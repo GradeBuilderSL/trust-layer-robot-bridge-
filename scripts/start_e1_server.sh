@@ -7,6 +7,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+if [ -f "${PWD}/.env.e1.local" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "${PWD}/.env.e1.local"
+    set +a
+fi
+
 export E1_SERVER_PORT="${E1_SERVER_PORT:-8083}"
 export E1_TRANSPORT="${E1_TRANSPORT:-auto}"
 export E1_NETWORK_IFACE="${E1_NETWORK_IFACE:-eth0}"

@@ -59,6 +59,7 @@ import logging
 import math
 import os
 import random
+import shutil
 import subprocess
 import threading
 import time
@@ -149,6 +150,35 @@ def _sdk_runtime_info() -> dict[str, Any]:
         "sdk_present": bool(SDK_ROOT),
         "dds_config_present": bool(SDK_DDS_CONFIG_PATH),
         "dds_helper_present": bool(DDS_HELPER_PATH),
+    }
+
+
+def _avg_motor_temperature(motors: list[dict[str, Any]]) -> float:
+    temps = [float(m.get("temperature", 0.0)) for m in motors if "temperature" in m]
+    return sum(temps) / len(temps) if temps else 30.0
+
+
+def _derive_mode_e1(st: dict[str, Any], fallback_mode: str) -> str:
+    workmode = st.get("workmode")
+    mapping = {
+        0: "disabled",
+        1: "walking",
+        2: "enabled",
+        3: "preparation",
+        4: "running",
+    }
+    if isinstance(workmode, (int, float)):
+        return mapping.get(int(workmode), fallback_mode)
+    return st.get("mode_e1", fallback_mode)
+
+
+def _status_flags(st: dict[str, Any]) -> dict[str, int]:
+    status_received = bool(st.get("status_received"))
+    return {
+        "camera_ok": 0,
+        "imu_ok": 1 if status_received and st.get("imu") else 0,
+        "mic_ok": 0,
+        "speaker_ok": 1 if (shutil.which("espeak-ng") or IFLYTEK_APP_ID) else 0,
     }
 
 
@@ -693,9 +723,16 @@ class E1Handler(BaseHTTPRequestHandler):
         return self._json({"error": "not found"}, 404)
 
     def _state(self) -> None:
+        global _e1_mode
         st = _transport.get_state()
+        motors = st.get("motors") or []
+        telemetry_mode = _derive_mode_e1(st, _e1_mode)
+        status_flags = _status_flags(st)
+        imu = st.get("imu") or {}
         with _state_lock:
-            mode = _e1_mode
+            mode = telemetry_mode
+            if st.get("status_received"):
+                _e1_mode = telemetry_mode
         out = {
             "robot_id": E1_ROBOT_ID,
             "name": E1_ROBOT_NAME,
@@ -709,31 +746,43 @@ class E1Handler(BaseHTTPRequestHandler):
             "pos_y": float(st.get("pos_y", 0.0)),
             "pos_z": float(st.get("pos_z", 0.0)),
             "yaw_rad": float(st.get("yaw_rad", 0.0)),
-            "pitch_deg": float(st.get("pitch_deg", 0.0)),
+            "pitch_deg": float((imu.get("ori") or [0.0, 0.0, 0.0, 0.0])[1] if imu else st.get("pitch_deg", 0.0)),
             "vx": float(st.get("vx", 0.0)),
             "speed_mps": float(st.get("speed_mps", 0.0)),
             "battery_pct": float(st.get("battery_pct", 0.0)),
-            "motor_temp_c": float(st.get("motor_temp_c", 30.0)),
-            "gait": st.get("gait", "STAND"),
-            "camera_ok": 1, "imu_ok": 1, "mic_ok": 1, "speaker_ok": 1,
+            "motor_temp_c": float(st.get("motor_temp_c", _avg_motor_temperature(motors))),
+            "gait": st.get("gait", "WALK" if abs(float(st.get("vx", 0.0))) > 0.01 else "STAND"),
+            **status_flags,
+            "status_received": bool(st.get("status_received")),
+            "workmode_raw": st.get("workmode"),
+            "joy_axes": st.get("joy_axes", [0.0, 0.0]),
+            "imu": imu,
+            "motors_count": len(motors),
+            "last_status_timestamp_us": st.get("timestamp_us"),
             "ts": time.time(),
         }
         self._json(out)
 
     def _capabilities(self) -> None:
+        st = _transport.get_state()
+        status_received = bool(st.get("status_received"))
+        speaker_available = bool(shutil.which("espeak-ng") or IFLYTEK_APP_ID)
         self._json({
-            "camera":     {"available": True,  "probe": "ok",
-                           "note": "depth camera (head)"},
+            "camera":     {"available": False, "probe": "not_integrated",
+                           "note": "Camera endpoint is not wired into e1_server yet"},
             "lidar":      {"available": False, "probe": "not_installed",
                            "note": "Noetix E1 has no lidar"},
-            "imu":        {"available": True,  "probe": "ok"},
-            "microphone": {"available": True,  "probe": "ok",
-                           "note": "iFlytek 6-mic array"},
-            "speaker":    {"available": True,  "probe": "ok",
-                           "note": "iFlytek AI sound card"},
+            "imu":        {"available": status_received,
+                           "probe": "ok" if status_received else "waiting_for_status"},
+            "microphone": {"available": False, "probe": "not_integrated",
+                           "note": "Hardware exists, but /api/audio/listen is still a stub"},
+            "speaker":    {"available": speaker_available,
+                           "probe": "ok" if speaker_available else "not_installed",
+                           "note": "Local espeak-ng fallback or iFlytek credentials"},
             "drive":      {"available": True,  "probe": "ok",
                            "note": "humanoid walking, no strafe"},
-            "battery":    {"available": True,  "probe": "ok"},
+            "battery":    {"available": status_received,
+                           "probe": "ok" if status_received else "waiting_for_status"},
             "network":    {"available": True,  "probe": "ok",
                            "note": "4G IoT SIM (1y included) + Wi-Fi/Ethernet"},
             "joints": {
@@ -742,7 +791,8 @@ class E1Handler(BaseHTTPRequestHandler):
                 "single_arm_dof": 5,
                 "single_leg_dof": 6,
             },
-            "transport": {"available": True, "probe": "ok",
+            "transport": {"available": True,
+                          "probe": "ok" if st.get("transport_ready", True) else "degraded",
                           "note": _transport.name},
         })
 

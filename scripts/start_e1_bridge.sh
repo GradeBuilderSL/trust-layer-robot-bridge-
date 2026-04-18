@@ -5,6 +5,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+if [ -f "${PWD}/.env.e1.local" ]; then
+    set -a
+    # shellcheck disable=SC1091
+    source "${PWD}/.env.e1.local"
+    set +a
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 TRUST_LAYER_LIVE_ENV="${REPO_ROOT}/../trust-layer/deployments/live/.env.live"

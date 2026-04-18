@@ -1,77 +1,107 @@
-# Установка Trust Layer Bridge на робота
+# Установка и старт Trust Layer Bridge на роботе
 
-Базовая установка для N2 и актуальные заметки по E1 Jetson.
+Актуальная инструкция для Jetson на Noetix E1. Документ рассчитан и на новый
+робот, и на тот, который уже был в работе: вместо пошаговой ручной настройки
+используется один и тот же idempotent bootstrap.
 
-## Требования
+## Что нужно заранее
 
+- доступ по SSH к Jetson
+- репозиторий `trust-layer-robot-bridge-` на Jetson
+- SDK `noetix_sdk_e1` рядом с репозиторием или в одном из стандартных путей
 - Python 3.8+
-- SSH-доступ к onboard компьютеру
-- сеть между роботом и операторским ноутбуком
 
-## Базовая установка
-
-### 1. Подключиться к роботу
+## Базовый путь для нового и существующего E1
 
 ```bash
-ssh noetix@192.168.1.100
-```
-
-### 2. Склонировать репозиторий
-
-```bash
-cd /home/noetix
-git clone <REPO_URL> trust-layer-robot-bridge-
-cd trust-layer-robot-bridge-
-```
-
-### 3. Установить зависимости Python
-
-```bash
-python3 -m pip install -r requirements.txt
-```
-
-### 4. Запустить bridge
-
-```bash
-ADAPTER_TYPE=http python3 -m bridge.main
-```
-
-### 5. Проверить
-
-```bash
-curl http://127.0.0.1:8080/health
-```
-
-## Noetix E1: Jetson bring-up
-
-Для E1 используются два процесса:
-
-- `bridge/e1_server.py` на `:8083`
-- `bridge.main` на `:8080`
-
-Рабочая последовательность:
-
-```bash
-# terminal 1
 cd /home/noetix/trust-layer-robot-bridge-
-E1_TRANSPORT=noetix_dds bash scripts/start_e1_server.sh
-
-# terminal 2
-cd /home/noetix/trust-layer-robot-bridge-
-ADAPTER_TYPE=e1 ROBOT_URL=http://127.0.0.1:8083 BRIDGE_PORT=8080 python3 -m bridge.main
+bash scripts/bootstrap_e1_robot.sh
 ```
 
-Проверка:
+Что делает bootstrap:
+
+- создаёт `.env.e1.local` из `.env.e1.local.example`, если локального файла ещё нет
+- ставит зависимости из `requirements.txt`
+- находит `noetix_sdk_e1`
+- пересобирает `native/e1_dds_bridge`, если доступен SDK и `cmake`
+- запускает `e1_server` на `:8083`
+- запускает `bridge.main` на `:8080`
+- снимает стартовый снимок телеметрии и сохраняет его в `runtime/e1/reports/`
+
+Отдельная архитектура bootstrap-пакета описана в:
+
+- [E1_BOOTSTRAP_ARCHITECTURE.md](E1_BOOTSTRAP_ARCHITECTURE.md)
+
+## Что хранится после bootstrap
+
+- логи: `runtime/e1/logs/e1_server.log`, `runtime/e1/logs/bridge.log`
+- pid-файлы: `runtime/e1/pids/`
+- телеметрия старта: `runtime/e1/reports/telemetry_*.json`
+
+## Если нужно только поднять стек повторно
+
+```bash
+cd /home/noetix/trust-layer-robot-bridge-
+bash scripts/start_e1_stack.sh
+```
+
+## Если нужно только переснять телеметрию
+
+```bash
+cd /home/noetix/trust-layer-robot-bridge-
+python3 scripts/e1_collect_telemetry.py \
+  --robot-url http://127.0.0.1:8083 \
+  --bridge-url http://127.0.0.1:8080 \
+  --output-dir runtime/e1/reports
+```
+
+## Проверки после старта
 
 ```bash
 curl -s http://127.0.0.1:8083/health
+curl -s http://127.0.0.1:8083/api/state
 curl -s http://127.0.0.1:8080/health
 curl -s http://127.0.0.1:8080/brain/status
 ```
 
-## Wi-Fi и SSH на Jetson
+## Настройки через `.env.e1.local`
 
-Подтвержденный рабочий сценарий:
+Локальный файл читается автоматически:
+
+- `scripts/start_e1_server.sh`
+- `scripts/start_e1_bridge.sh`
+- `scripts/start_e1_stack.sh`
+- `scripts/bootstrap_e1_robot.sh`
+
+Основные переменные:
+
+- `E1_TRANSPORT=noetix_dds`
+- `E1_SERVER_PORT=8083`
+- `BRIDGE_PORT=8080`
+- `ROBOT_URL=http://127.0.0.1:8083`
+- `E1_BOOTSTRAP_INSTALL_DEPS=1`
+- `E1_BOOTSTRAP_BUILD_HELPER=1`
+- `E1_BOOTSTRAP_START_STACK=1`
+- `E1_BOOTSTRAP_COLLECT_TELEMETRY=1`
+- `E1_BOOTSTRAP_INSTALL_SPEECH=0`
+
+## Пакет bootstrap как обновляемый слой
+
+Bootstrap теперь модульный. Его внутренняя структура:
+
+- `scripts/bootstrap_e1_robot.sh` — точка входа
+- `scripts/e1_bootstrap/lib.sh` — общая библиотека
+- `scripts/e1_bootstrap/phases.d/` — нумерованные фазы
+
+Это позволяет:
+
+- добавлять новые шаги без переписывания entrypoint
+- обновлять отдельные части пакета независимо
+- поддерживать один и тот же способ запуска для нового и старого робота
+
+## Wi-Fi
+
+Подтверждённый сценарий:
 
 ```bash
 sudo nmcli dev wifi list
@@ -87,15 +117,15 @@ sudo systemctl status ssh --no-pager
 ss -ltnp | grep :22
 ```
 
-Нюансы:
+Важно:
 
-- guest Wi-Fi может давать интернет, но блокировать SSH/HTTP между клиентами
-- если используется guest-сеть, отключить client isolation / AP isolation на роутере
-- не отключать LAN, пока Wi-Fi SSH и `curl http://<wifi-ip>:8083/health` не подтверждены
+- guest-сеть может давать интернет, но блокировать SSH и HTTP между клиентами
+- если используется guest Wi-Fi, нужно отключить client isolation / AP isolation
+- LAN лучше отключать только после проверки SSH и `/health` по Wi-Fi
 
 ## Речь на Jetson
 
-Минимальный подтвержденный стек:
+Подтверждённый минимальный вариант:
 
 ```bash
 sudo apt update
@@ -110,8 +140,3 @@ curl -s -X POST "http://127.0.0.1:8083/api/audio/speak" \
   -H "Content-Type: application/json" \
   -d '{"text":"Привет. Я робот E1.","lang":"ru"}'
 ```
-
-Подробности по локальной речи и будущему локальному AI стеку:
-
-- [JETSON_LOCAL_AI.md](JETSON_LOCAL_AI.md)
-- [OPERATOR_E1.md](OPERATOR_E1.md)

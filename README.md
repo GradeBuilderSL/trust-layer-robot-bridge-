@@ -25,6 +25,24 @@ The E1 path has two processes:
 - `bridge/e1_server.py` on `:8083`
 - `bridge.main` on `:8080`
 
+There is also a dedicated startup package layer:
+- `scripts/e1_bootstrap/` - modular bootstrap package for provisioning, updating, and startup telemetry
+
+For a fresh Jetson or a robot that was already in use, the same idempotent
+bootstrap script can prepare and start the stack:
+
+```bash
+cd /home/noetix/trust-layer-robot-bridge-
+bash scripts/bootstrap_e1_robot.sh
+```
+
+Bootstrap does all of this in one run:
+- creates `.env.e1.local` from the example if needed
+- installs Python dependencies
+- rebuilds `native/e1_dds_bridge` when the Noetix SDK is present
+- starts `e1_server` and `bridge.main` in the background
+- saves logs, pid files, and a startup telemetry snapshot under `runtime/e1/`
+
 Recommended launch order on Jetson:
 
 ```bash
@@ -55,6 +73,58 @@ Current known-good E1 status:
 Current E1 limitation:
 - `Robot_Status_Topic` telemetry is not yet confirmed in the helper, so `/api/state` can still show placeholder values while command publish works.
 
+## E1 Architecture
+
+```text
+Operator
+  ->
+Bootstrap package (scripts/e1_bootstrap/)
+  ->
+Trust Layer bridge (:8080)
+  ->
+e1_server.py (:8083)
+  ->
+native e1_dds_bridge
+  ->
+Noetix DDS SDK
+  ->
+E1 robot
+```
+
+Bootstrap package responsibilities:
+- local config bootstrap through `.env.e1.local`
+- dependency installation
+- helper rebuild
+- background stack start
+- startup telemetry snapshot
+
+The package is modular: each step lives in `scripts/e1_bootstrap/phases.d/` and
+can be extended without rewriting `scripts/bootstrap_e1_robot.sh`.
+
+## E1 Startup Package
+
+Files:
+- `scripts/bootstrap_e1_robot.sh` - one-shot setup for new and existing robots
+- `scripts/e1_bootstrap/` - extensible bootstrap package with ordered phases
+- `scripts/start_e1_stack.sh` - background launcher for `:8083` and `:8080`
+- `scripts/e1_collect_telemetry.py` - captures startup health/state/capabilities snapshots
+- `.env.e1.local.example` - local config template for Jetson
+
+Generated at runtime:
+- `runtime/e1/logs/`
+- `runtime/e1/pids/`
+- `runtime/e1/reports/telemetry_*.json`
+
+If you only need to refresh the telemetry snapshot:
+
+```bash
+cd /home/noetix/trust-layer-robot-bridge-
+python3 scripts/e1_collect_telemetry.py \
+  --robot-url http://127.0.0.1:8083 \
+  --bridge-url http://127.0.0.1:8080 \
+  --output-dir runtime/e1/reports
+```
+
 ## Repository Structure
 
 ```text
@@ -67,12 +137,17 @@ native/
   e1_dds_bridge.cpp       Native DDS helper for E1
   CMakeLists.txt          Helper build
 scripts/
+  e1_bootstrap/           Modular E1 bootstrap package
+  bootstrap_e1_robot.sh   One-shot bootstrap entry point
   start_e1_server.sh      Start E1 low-level server on Jetson
   start_e1_bridge.sh      Start Trust Layer bridge against E1
+  start_e1_stack.sh       Start the whole E1 stack in background
+  e1_collect_telemetry.py Startup telemetry collector
   e1_dialog.py            Simple text-to-voice dialog loop
 docs/
   OPERATOR_E1.md          Live operator notes for E1
   ROBOT_SETUP.md          Install and bring-up notes
+  E1_BOOTSTRAP_ARCHITECTURE.md Bootstrap package architecture
   JETSON_LOCAL_AI.md      Speech and local AI notes for Jetson Orin
 ```
 
