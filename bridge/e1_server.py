@@ -78,12 +78,78 @@ E1_SERVER_PORT     = int(os.environ.get("E1_SERVER_PORT", "8083"))
 E1_TRANSPORT_MODE  = os.environ.get("E1_TRANSPORT", "auto").lower()
 E1_NETWORK_IFACE   = os.environ.get("E1_NETWORK_IFACE", "eth0")
 E1_DDS_TOPIC_PFX   = os.environ.get("E1_DDS_TOPIC_PREFIX", "rt")
+E1_SDK_ROOT        = os.environ.get("E1_SDK_ROOT", "")
+E1_DDS_CONFIG_PATH = os.environ.get("E1_DDS_CONFIG_PATH", "")
+E1_SDK_LIB_DIR     = os.environ.get("E1_SDK_LIB_DIR", "")
+E1_DDS_HELPER_PATH = os.environ.get("E1_DDS_HELPER_PATH", "")
 E1_ROBOT_ID        = os.environ.get("E1_ROBOT_ID", "e1-01")
 E1_ROBOT_NAME      = os.environ.get("E1_ROBOT_NAME", "Noetix E1")
 
 IFLYTEK_APP_ID     = os.environ.get("IFLYTEK_APP_ID", "")
 IFLYTEK_API_KEY    = os.environ.get("IFLYTEK_API_KEY", "")
 IFLYTEK_API_SECRET = os.environ.get("IFLYTEK_API_SECRET", "")
+
+
+def _path_if_exists(path: str) -> Optional[str]:
+    return path if path and os.path.exists(path) else None
+
+
+def _detect_sdk_root() -> Optional[str]:
+    candidates = [
+        E1_SDK_ROOT,
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "noetix_sdk_e1")),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "noetix_sdk_e1")),
+        "/opt/noetix_sdk_e1",
+        "/opt/trust-layer-bridge/noetix_sdk_e1",
+        "/home/noetix/noetix_sdk_e1",
+    ]
+    for candidate in candidates:
+        if candidate and os.path.isfile(os.path.join(candidate, "config", "dds.xml")):
+            return candidate
+    return None
+
+
+SDK_ROOT = _detect_sdk_root()
+SDK_DDS_CONFIG_PATH = _path_if_exists(E1_DDS_CONFIG_PATH) or (
+    os.path.join(SDK_ROOT, "config", "dds.xml") if SDK_ROOT else None
+)
+if SDK_ROOT:
+    _sdk_default_lib_dir = (
+        _path_if_exists(os.path.join(SDK_ROOT, "lib", "aarch64"))
+        or _path_if_exists(os.path.join(SDK_ROOT, "lib", "x86_64"))
+    )
+else:
+    _sdk_default_lib_dir = None
+SDK_LIB_DIR = _path_if_exists(E1_SDK_LIB_DIR) or _sdk_default_lib_dir
+
+
+def _detect_dds_helper() -> Optional[str]:
+    candidates = [
+        E1_DDS_HELPER_PATH,
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "native", "build", "e1_dds_bridge")),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "native", "build", "Release", "e1_dds_bridge.exe")),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "native", "build", "e1_dds_bridge.exe")),
+        "/opt/trust-layer-bridge/native/build/e1_dds_bridge",
+    ]
+    for candidate in candidates:
+        if candidate and os.path.isfile(candidate):
+            return candidate
+    return None
+
+
+DDS_HELPER_PATH = _detect_dds_helper()
+
+
+def _sdk_runtime_info() -> dict[str, Any]:
+    return {
+        "sdk_root": SDK_ROOT,
+        "dds_config_path": SDK_DDS_CONFIG_PATH,
+        "sdk_lib_dir": SDK_LIB_DIR,
+        "dds_helper_path": DDS_HELPER_PATH,
+        "sdk_present": bool(SDK_ROOT),
+        "dds_config_present": bool(SDK_DDS_CONFIG_PATH),
+        "dds_helper_present": bool(DDS_HELPER_PATH),
+    }
 
 
 # ── Transport interface ───────────────────────────────────────────────────
@@ -118,77 +184,156 @@ class _Transport:
 # ── Noetix DDS transport ──────────────────────────────────────────────────
 
 class _NoetixDDSTransport(_Transport):
-    """Talks to Noetix E1 motion-control board via the DDS SDK that ships in
-    `dds_demo_release_e1.tar.gz`.
+    """Talks to the vendor DDS SDK through a local helper subprocess.
 
-    The exact topic names and message classes from that SDK aren't open;
-    you must unpack the tarball on the Jetson and patch the four spots
-    marked `# >>> SDK <<<` below to match the schema. The skeleton runs
-    fine without them — it just logs warnings.
+    Python stays as the HTTP/control layer; the native helper owns CycloneDDS
+    and the vendor IDL types. Commands are newline-delimited JSON sent to the
+    helper's stdin, and cached state is read from its stdout.
     """
 
     name = "noetix_dds"
 
     def __init__(self) -> None:
-        self._lowstate: dict = {}
-        self._cmd_pub = None
+        self._lowstate: dict[str, Any] = {}
         self._initialised = False
-        self._init_sdk()
+        self._init_error: Optional[str] = None
+        self._helper_proc: Optional[subprocess.Popen[str]] = None
+        self._reader_thread: Optional[threading.Thread] = None
+        self._write_lock = threading.Lock()
+        self._start_helper()
 
-    def _init_sdk(self) -> None:
+    def _start_helper(self) -> None:
         try:
-            # >>> SDK <<<  Replace with the import path Noetix ships, e.g.:
-            # from noetix_e1_sdk.core.channel import ChannelFactory, ChannelSubscriber, ChannelPublisher
-            # from noetix_e1_sdk.idl.SportCmd_ import SportCmd_
-            # from noetix_e1_sdk.idl.LowState_ import LowState_
-            from cyclonedds.domain import DomainParticipant  # type: ignore
-            from cyclonedds.topic import Topic  # type: ignore
-            from cyclonedds.pub import DataWriter, Publisher  # type: ignore
-            from cyclonedds.sub import DataReader, Subscriber  # type: ignore
+            if not SDK_DDS_CONFIG_PATH:
+                raise RuntimeError(
+                    "No DDS config found. Set E1_SDK_ROOT or E1_DDS_CONFIG_PATH."
+                )
+            if not DDS_HELPER_PATH:
+                raise RuntimeError(
+                    "No native DDS helper found. Build native/e1_dds_bridge or set "
+                    "E1_DDS_HELPER_PATH."
+                )
 
-            self._dp = DomainParticipant(0)
-            logger.info("Noetix DDS: cyclonedds DomainParticipant ready on %s",
-                        E1_NETWORK_IFACE)
+            env = os.environ.copy()
+            if SDK_LIB_DIR:
+                existing = env.get("LD_LIBRARY_PATH", "")
+                env["LD_LIBRARY_PATH"] = (
+                    f"{SDK_LIB_DIR}:{existing}" if existing else SDK_LIB_DIR
+                )
 
-            # >>> SDK <<<  Wire publishers/subscribers here once you have
-            # the IDL classes. Example shape:
-            #
-            #   self._cmd_topic = Topic(self._dp, f"{E1_DDS_TOPIC_PFX}/cmd_vel", SportCmd_)
-            #   self._cmd_pub   = DataWriter(Publisher(self._dp), self._cmd_topic)
-            #
-            #   self._state_topic  = Topic(self._dp, f"{E1_DDS_TOPIC_PFX}/lowstate", LowState_)
-            #   self._state_reader = DataReader(Subscriber(self._dp), self._state_topic)
-            #   threading.Thread(target=self._reader_loop, daemon=True).start()
+            self._helper_proc = subprocess.Popen(
+                [
+                    DDS_HELPER_PATH,
+                    "--dds-config",
+                    SDK_DDS_CONFIG_PATH,
+                ],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+                env=env,
+            )
+            self._reader_thread = threading.Thread(
+                target=self._reader_loop,
+                name="e1-dds-reader",
+                daemon=True,
+            )
+            self._reader_thread.start()
+            threading.Thread(
+                target=self._stderr_loop,
+                name="e1-dds-stderr",
+                daemon=True,
+            ).start()
 
             self._initialised = True
+            logger.info("Noetix DDS helper ready: %s", DDS_HELPER_PATH)
         except Exception as exc:
+            self._init_error = str(exc)
             logger.warning(
-                "Noetix DDS init failed (%s) — server will return cached/empty state. "
-                "Install cyclonedds + dds_demo_release_e1 SDK and patch _NoetixDDSTransport.",
-                exc,
+                "Noetix DDS init failed (%s) - server will return cached/empty state. "
+                "Build native/e1_dds_bridge and make sure the SDK is present.",
+                self._init_error,
             )
 
+    def _reader_loop(self) -> None:
+        assert self._helper_proc is not None
+        assert self._helper_proc.stdout is not None
+        for line in self._helper_proc.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                logger.debug("e1 helper stdout: %s", line)
+                continue
+
+            msg_type = payload.get("type")
+            if msg_type == "state":
+                self._lowstate = payload.get("state", {})
+            elif msg_type == "ready":
+                self._init_error = None
+                self._initialised = True
+            elif msg_type == "error":
+                self._init_error = payload.get("message", "helper error")
+                logger.warning("e1 helper error: %s", self._init_error)
+            else:
+                logger.debug("e1 helper msg: %s", payload)
+
+    def _stderr_loop(self) -> None:
+        assert self._helper_proc is not None
+        assert self._helper_proc.stderr is not None
+        for line in self._helper_proc.stderr:
+            line = line.strip()
+            if line:
+                logger.info("e1_dds_bridge %s", line)
+
+    def _send_helper(self, payload: dict[str, Any]) -> None:
+        if not self._initialised or self._helper_proc is None or self._helper_proc.stdin is None:
+            logger.debug("noetix_dds helper not ready, dropping payload %s", payload)
+            return
+        with self._write_lock:
+            self._helper_proc.stdin.write(
+                json.dumps(payload, separators=(",", ":")) + "\n"
+            )
+            self._helper_proc.stdin.flush()
+
     def get_state(self) -> dict:
-        # Until the SDK reader is wired, return whatever the optional thread
-        # has cached. The bridge will see "transport=noetix_dds" but null
-        # telemetry and surface that to the operator.
-        return dict(self._lowstate)
+        return {
+            **_sdk_runtime_info(),
+            "transport_ready": self._initialised,
+            "transport_error": self._init_error,
+            **self._lowstate,
+        }
 
     def send_velocity(self, vx: float, vyaw: float) -> None:
-        if not self._initialised or self._cmd_pub is None:
-            logger.debug("noetix_dds.send_velocity(%.3f, %.3f) ignored — SDK not wired",
-                         vx, vyaw)
-            return
-        # >>> SDK <<<  Build the SportCmd_ sample and write it. Example:
-        #
-        #   cmd = SportCmd_(vx=float(vx), vy=0.0, vyaw=float(vyaw),
-        #                   mode_request=0)  # 0 = walk
-        #   self._cmd_pub.write(cmd)
-        logger.debug("noetix_dds.send_velocity(%.3f, %.3f) — implement SDK call",
-                     vx, vyaw)
+        action = "WALK" if abs(vx) > 1e-4 or abs(vyaw) > 1e-4 else "DEFAULT"
+        self._send_helper(
+            {
+                "type": "cmd_vel",
+                "vx": float(vx),
+                "vyaw": float(vyaw),
+                "action": action,
+            }
+        )
 
     def stop(self) -> None:
-        self.send_velocity(0.0, 0.0)
+        self._send_helper({"type": "stop"})
+
+    def set_mode(self, mode: str) -> None:
+        self._send_helper({"type": "set_mode_name", "mode": mode})
+
+    def gesture(self, name: str, slot: str) -> None:
+        self._send_helper({"type": "gesture", "name": name, "slot": slot})
+
+    def shutdown(self) -> None:
+        try:
+            self._send_helper({"type": "shutdown"})
+        except Exception:
+            pass
+        if self._helper_proc is not None:
+            self._helper_proc.terminate()
 
 
 # ── ROS 2 transport ───────────────────────────────────────────────────────
@@ -423,11 +568,14 @@ def _select_transport() -> _Transport:
     if requested == "sim":
         return _SimTransport()
 
-    # auto: ROS 2 → sim. DDS is intentionally NOT auto-picked because the
-    # _NoetixDDSTransport skeleton needs SDK wiring before it returns real
-    # telemetry; until then it would hand the operator a battery=0 / pos=0
-    # robot and look like a hardware fault. Set E1_TRANSPORT=noetix_dds
-    # explicitly once you've patched the four `# >>> SDK <<<` spots.
+    # auto: prefer the vendor DDS path when the SDK bundle is present,
+    # otherwise try ROS 2 and finally fall back to sim.
+    if SDK_DDS_CONFIG_PATH:
+        try:
+            logger.info("auto: detected DDS config at %s", SDK_DDS_CONFIG_PATH)
+            return _NoetixDDSTransport()
+        except Exception as exc:
+            logger.debug("auto: noetix_dds unavailable (%s)", exc)
     try:
         return _ROS2Transport()
     except Exception as exc:
@@ -533,9 +681,15 @@ class E1Handler(BaseHTTPRequestHandler):
             return self._json({"status": "not_implemented",
                                "note": "Wire to E1 head depth camera"})
         if path == "/health":
-            return self._json({"status": "ok",
-                               "transport": _transport.name,
-                               "robot_id": E1_ROBOT_ID})
+            transport_state = _transport.get_state()
+            return self._json({
+                "status": "ok",
+                "transport": _transport.name,
+                "robot_id": E1_ROBOT_ID,
+                **_sdk_runtime_info(),
+                "transport_ready": transport_state.get("transport_ready", True),
+                "transport_error": transport_state.get("transport_error"),
+            })
         return self._json({"error": "not found"}, 404)
 
     def _state(self) -> None:
@@ -546,6 +700,9 @@ class E1Handler(BaseHTTPRequestHandler):
             "robot_id": E1_ROBOT_ID,
             "name": E1_ROBOT_NAME,
             "transport": _transport.name,
+            **_sdk_runtime_info(),
+            "transport_ready": st.get("transport_ready", True),
+            "transport_error": st.get("transport_error"),
             "mode_e1": mode,
             "trust_mode": "ADVISORY",
             "pos_x": float(st.get("pos_x", 0.0)),
@@ -592,19 +749,21 @@ class E1Handler(BaseHTTPRequestHandler):
     # ── POST ─────────────────────────────────────────────────────────────
 
     def do_POST(self) -> None:
+        parsed = urlparse(self.path)
+        qs = parse_qs(parsed.query)
         length = int(self.headers.get("Content-Length", 0))
         try:
             body = json.loads(self.rfile.read(length) or b"{}")
         except Exception:
             return self._json({"error": "bad json"}, 400)
 
-        path = urlparse(self.path).path
-        if path == "/api/cmd/walk":
-            return self._cmd_walk(body)
+        path = parsed.path
+        if path in ("/api/cmd/walk", "/api/cmd/vel"):
+            return self._cmd_walk(body, qs)
         if path == "/api/cmd/stop":
             return self._cmd_stop()
         if path == "/api/cmd/mode":
-            return self._cmd_mode(body)
+            return self._cmd_mode(body, qs)
         if path == "/api/cmd/gesture":
             return self._cmd_gesture(body)
         if path == "/api/audio/speak":
@@ -619,10 +778,11 @@ class E1Handler(BaseHTTPRequestHandler):
             })
         return self._json({"error": "not found"}, 404)
 
-    def _cmd_walk(self, body: dict) -> None:
+    def _cmd_walk(self, body: dict, qs: dict[str, list[str]] | None = None) -> None:
         global _e1_mode
-        vx = float(body.get("vx", 0))
-        vyaw = float(body.get("vyaw", 0))
+        qs = qs or {}
+        vx = float(body.get("vx", qs.get("vx", ["0"])[0]))
+        vyaw = float(body.get("vyaw", qs.get("vyaw", ["0"])[0]))
         with _state_lock:
             mode = _e1_mode
         if mode in ("disabled", "enabled", "preparation"):
@@ -645,9 +805,10 @@ class E1Handler(BaseHTTPRequestHandler):
             return self._json({"status": "error", "error": str(exc)}, 500)
         self._json({"status": "stopped"})
 
-    def _cmd_mode(self, body: dict) -> None:
+    def _cmd_mode(self, body: dict, qs: dict[str, list[str]] | None = None) -> None:
         global _e1_mode
-        new_mode = str(body.get("mode", "walking")).lower()
+        qs = qs or {}
+        new_mode = str(body.get("mode", qs.get("mode", ["walking"])[0])).lower()
         valid = {"disabled", "enabled", "preparation",
                  "walking", "running", "teaching"}
         if new_mode not in valid:
