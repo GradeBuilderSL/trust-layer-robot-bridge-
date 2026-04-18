@@ -1,0 +1,125 @@
+# Noetix E1 Humanoid Robot
+# Source: Noetix E1 Delivery Document (2025)
+# ────────────────────────────────────────────────────────────────
+robot_id: e1
+type: humanoid
+name: "Noetix E1"
+manufacturer: Noetix Robotics
+adapter: e1
+
+# Network — Jetson Orin Nano Super (EDU edition)
+# DO NOT use the RK3588S motion-control board IP — SSH'ing it during
+# motion will starve EtherCAT and the robot will collapse.
+default_url: "http://192.168.55.101:8083"   # e1_server.py on Jetson
+api_server_port: 8083
+ssh_user: noetix
+ssh_password: noetix      # default factory; change for production deployments
+
+# Movement limits — derived from delivery doc, conservative defaults
+max_speed_mps: 0.7              # walking mode
+max_speed_running_mps: 1.2      # running mode (operator must opt in)
+max_angular_rad_s: 1.5
+max_step_height_m: 0.05         # delivery doc: cannot step above 5 cm
+max_slope_deg: 25               # delivery doc: falls past 25°
+lateral_movement: false         # E1 walks forward/back/turn, no strafe
+
+# Physical dimensions (delivery doc)
+dimensions:
+  height_m: 1.40
+  width_m: 0.48
+  depth_m: 0.32
+  weight_kg: 44.5
+  arm_span_m: 0.60
+  leg_length_m: 0.70
+  footprint_radius_m: 0.30
+
+# Joint inventory
+joints:
+  total_dof: 24                 # delivery doc: 19–24 DOF (configuration dependent)
+  single_arm_dof: 5
+  single_leg_dof: 6
+  encoder_type: dual            # delivery doc
+  max_torque_nm: 150
+  comm_bus: CAN
+  comm_baud_bps: 1000000
+
+# Safety thresholds
+safety:
+  max_tilt_deg: 22              # tighter than H1 — E1 has smaller foot polygon
+  fall_threshold_deg: 30
+  min_battery_pct: 15
+  obstacle_stop_dist_m: 0.4
+  cooling: local_air            # motors heat under sustained load
+  ssh_motion_board_locked: true # NEVER SSH RK3588S during motion
+
+# Compute (EDU edition)
+compute:
+  motion_board:
+    model: "Rockchip RK3588S"
+    power_tops: 6
+    ram_gb: 8       # 6+64GB in delivery doc — interpret as 6 TOPS / 64GB+ flash
+    ssh_allowed: false
+  ai_board:
+    model: "NVIDIA Jetson Orin Nano Super"
+    power_tops: 67
+    ram_gb: 8
+    user: noetix
+
+# Capabilities
+capabilities:
+  - walk
+  - run
+  - turn
+  - stand_up
+  - lie_down
+  - mode_switch
+  - gesture
+  - handshake
+  - greet
+  - cheer
+  - teaching        # gamepad-recorded arm trajectories, RB+Y/B/X
+  - depth_camera
+  - microphone_array
+  - speaker
+  - tts_onboard      # iFlytek Spark4.0 Ultra
+  - stt_onboard      # iFlytek 6-mic, wake word "小顽童"
+
+# Voice (iFlytek)
+voice:
+  model: "iFlytek Spark 4.0 Ultra"
+  microphones: 6
+  audio_format: "2CH 16kHz 16bit"
+  wake_word: "小顽童"
+  wake_distance_m: 5
+  sleep_timeout_s: 30
+  sim_card: "operator IoT 4G, 100GB/month, 1y included"
+
+# Mode flow (gamepad state machine)
+modes:
+  - disabled            # all joints soft, emergency stop
+  - enabled             # joints damped, automatic on power-on after ~10s
+  - preparation         # legs slightly bent, ready to walk
+  - walking             # primary operating mode
+  - running             # higher max speed, opt-in
+  - teaching            # arms soft, record gestures to A/B/X/Y slots
+
+# Professions this robot type supports
+supported_professions:
+  - exhibition_robot
+  - h1_exhibition       # exhibition pack is portable across humanoids
+  - greeter
+  - guide
+
+# Exhibition defaults
+exhibition:
+  default_exhibition: auto_show
+  chat_language: ru
+  greeting_gesture: greet     # gamepad B equivalent
+  photo_pose: cheer           # gamepad Y equivalent
+
+# Vendor support
+support:
+  fae_email: "ziyangtang@noetixrobotics.com"
+  website: "https://noetixrobotics.com/"
+  sdk_archive: "dds_demo_release_e1.tar.gz"
+  doc: "https://noetixrobotics.feishu.cn/docx/BdJddzSwqoDhd9xixobcXj9XnAe"

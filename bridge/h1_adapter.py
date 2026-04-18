@@ -149,6 +149,47 @@ class H1Adapter(RobotAdapter):
         result = self._get("/api/camera/capture")
         return result or {"status": "error", "adapter": "h1"}
 
+    def probe_capabilities(self) -> dict:
+        """Hardware capability probe.
+
+        Asks h1_server /api/capabilities and normalises the answer into
+        the shape the Trust Layer expects (same keys as HttpAdapter /
+        E1Adapter). Falls back to a disconnected skeleton when the
+        server is unreachable, so the adapter never lies about what's
+        available.
+
+        Key facts about H1 hardware:
+          * No lidar — pinned to ``not_installed`` regardless of what
+            the server reports, same policy as E1.
+          * Camera + IMU are standard on every H1 build.
+          * Speaker depends on firmware — surfaced from the server.
+        """
+        data = self._get("/api/capabilities") or {}
+        default = {
+            "camera":     {"available": True,  "probe": "ok"},
+            "lidar":      {"available": False, "probe": "not_installed",
+                           "note": "Unitree H1 ships with stereo cameras only, no lidar"},
+            "imu":        {"available": True,  "probe": "ok"},
+            "microphone": {"available": False, "probe": "not_available"},
+            "speaker":    {"available": False, "probe": "not_available"},
+            "drive":      {"available": True,  "probe": "ok",
+                           "note": "bipedal locomotion"},
+            "battery":    {"available": True,  "probe": "ok"},
+            "network":    {"available": self.connected, "probe": "ok" if self.connected else "disconnected"},
+        }
+        # Overlay whatever the server actually reported.
+        if isinstance(data, dict):
+            for key, value in data.items():
+                if isinstance(value, dict):
+                    default[key] = value
+        # H1 physically has no lidar — override any server claim.
+        default["lidar"] = {
+            "available": False,
+            "probe": "not_installed",
+            "note": "Unitree H1 has stereo cameras only, no lidar",
+        }
+        return default
+
     # ── HTTP helpers ──────────────────────────────────────────────────────
 
     def _get(self, path: str) -> dict | None:

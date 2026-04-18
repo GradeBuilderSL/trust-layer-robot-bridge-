@@ -1,203 +1,212 @@
 # Trust Layer Robot Bridge
 
-FastAPI bridge between a physical robot and the Trust Layer platform.
-Runs on the robot's onboard computer or on a local laptop for testing.
+HTTP bridge between physical robots and the Trust Layer platform.
 
-Supports:
-- **Noetix N2** (wheeled AMR) — via HTTP adapter
-- **Unitree H1** (humanoid) — via HTTP adapter to `h1_server.py`
-- **Simulation** — mock adapter with physics simulation, no robot required
-
----
+Confirmed active robot paths in this repo:
+- Noetix N2 via HTTP adapter
+- Unitree H1 via `h1_server.py`
+- Noetix E1 via `e1_server.py` + native DDS helper
+- Mock/sim mode for local development
 
 ## Quick Start
 
-### Simulation mode (no robot needed)
+### Mock mode
 
 ```bash
 pip install -r requirements.txt
 python -m bridge.main
 ```
 
-Bridge starts at `http://localhost:8080` with the mock adapter.
+Bridge starts on `http://127.0.0.1:8080`.
 
-### Real Noetix N2 robot
+### Noetix E1 on Jetson
 
-```bash
-ADAPTER_TYPE=http ROBOT_URL=http://192.168.1.100:8000 python -m bridge.main
-```
+The E1 path has two processes:
+- `bridge/e1_server.py` on `:8083`
+- `bridge.main` on `:8080`
 
-### Unitree H1 humanoid
-
-```bash
-# Start H1 server on the robot first (requires Unitree SDK2)
-python bridge/h1_server.py
-
-# Then start the bridge pointing to H1 server
-ADAPTER_TYPE=h1 ROBOT_URL=http://192.168.123.1:8081 python -m bridge.main
-```
-
-### Docker
+Recommended launch order on Jetson:
 
 ```bash
-docker build -t trust-layer-bridge .
-docker run -p 8080:8080 -e ADAPTER_TYPE=mock trust-layer-bridge
+# terminal 1
+cd /home/noetix/trust-layer-robot-bridge-
+E1_TRANSPORT=noetix_dds bash scripts/start_e1_server.sh
+
+# terminal 2
+cd /home/noetix/trust-layer-robot-bridge-
+ADAPTER_TYPE=e1 ROBOT_URL=http://127.0.0.1:8083 BRIDGE_PORT=8080 python3 -m bridge.main
 ```
 
----
+Health checks:
+
+```bash
+curl -s http://127.0.0.1:8083/health
+curl -s http://127.0.0.1:8080/health
+curl -s http://127.0.0.1:8080/brain/status
+```
+
+Current known-good E1 status:
+- `e1_server` answers on `:8083`
+- native helper `native/build/e1_dds_bridge` builds and starts
+- command publish path into DDS is confirmed
+- local speech output through `espeak-ng` is confirmed
+- SSH over Wi-Fi is confirmed after disabling client isolation on the router
+
+Current E1 limitation:
+- `Robot_Status_Topic` telemetry is not yet confirmed in the helper, so `/api/state` can still show placeholder values while command publish works.
 
 ## Repository Structure
 
-```
+```text
 bridge/
-├── main.py                # FastAPI application — all HTTP endpoints
-├── mock_adapter.py        # Physics simulation (mock robot)
-├── http_adapter.py        # Noetix N2 HTTP API adapter
-├── h1_adapter.py          # Unitree H1 humanoid adapter
-├── h1_server.py           # H1 REST bridge (runs on robot with Unitree SDK2)
-├── safety_pipeline.py     # Local safety checks (speed, tilt, battery, obstacles)
-├── watchdog.py            # Connection watchdog — triggers SAFE_FALLBACK on loss
-├── connectivity_monitor.py # Network connectivity monitoring
-├── event_buffer.py        # Timestamped event log (reasoning history)
-├── local_brain.py         # Onboard LLM / local decision support
-├── license_manager.py     # License validation and activation
-└── profession_deployer.py # Deploys profession packs to the robot
-robots/
-├── n2.yaml                # Noetix N2 robot profile
-└── h1.yaml                # Unitree H1 robot profile
+  main.py                 FastAPI bridge
+  e1_server.py            Noetix E1 low-level HTTP server
+  e1_adapter.py           Trust Layer adapter for E1
+  h1_server.py            Unitree H1 HTTP bridge
+native/
+  e1_dds_bridge.cpp       Native DDS helper for E1
+  CMakeLists.txt          Helper build
+scripts/
+  start_e1_server.sh      Start E1 low-level server on Jetson
+  start_e1_bridge.sh      Start Trust Layer bridge against E1
+  e1_dialog.py            Simple text-to-voice dialog loop
+docs/
+  OPERATOR_E1.md          Live operator notes for E1
+  ROBOT_SETUP.md          Install and bring-up notes
+  JETSON_LOCAL_AI.md      Speech and local AI notes for Jetson Orin
 ```
 
----
+## API Overview
 
-## API Reference
+### Bridge `:8080`
 
-### Core
+- `GET /health`
+- `GET /robot/state`
+- `POST /robot/move`
+- `POST /robot/stop`
+- `GET /brain/status`
+- `POST /chat`
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Bridge health and adapter status |
-| `GET` | `/robot/state` | Current telemetry: position, velocity, battery, tilt, sensors |
-| `POST` | `/robot/move` | Send velocity command `{vx, vy, wz}` through safety pipeline |
-| `POST` | `/robot/stop` | Emergency stop |
-| `POST` | `/robot/heartbeat` | Keep-alive from operator UI |
+### E1 server `:8083`
 
-### Capabilities & Safety
+- `GET /health`
+- `GET /api/state`
+- `POST /api/cmd/vel`
+- `POST /api/cmd/stop`
+- `POST /api/cmd/gesture`
+- `POST /api/audio/speak`
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/robot/capabilities` | Hardware capability scan (camera, lidar, IMU, drive, battery…) + ROS2 discovery |
-| `GET` | `/robot/reasoning` | Recent safety pipeline decisions (ALLOW / DENY / LIMIT with reason codes) |
-| `GET` | `/pipeline/stats` | Safety pipeline statistics |
-| `GET` | `/watchdog/status` | Watchdog state and last heartbeat time |
+## Environment
 
-### Scenarios (testing)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/scenario/inject` | Inject test conditions: `{battery_pct, tilt_deg, human_distance_m, obstacle_distance_m}` |
-| `POST` | `/scenario/clear` | Reset to normal operating state |
-
-### Perception
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/camera/capture` | Capture frame from robot camera |
-| `GET` | `/camera/frame` | Latest camera frame (JPEG) |
-| `GET` | `/camera/status` | Camera availability and settings |
-
-### Voice
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `POST` | `/voice/speak` | Send TTS command `{text, lang}` to robot speaker |
-| `GET` | `/voice/listen` | Activate STT and return recognized text |
-
-### Brain (onboard LLM)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/brain/status` | Local LLM status |
-| `POST` | `/brain/sync` | Sync knowledge base from workstation |
-| `POST` | `/chat` | Send chat message to local brain |
-| `POST` | `/chat/send` | Alias for `/chat` |
-
-### License
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/license/status` | Current license state |
-| `GET` | `/license/activation-request` | Get activation request token |
-| `POST` | `/license/activate` | Activate with license key |
-| `POST` | `/license/apply-token` | Apply signed activation token |
-
----
-
-## Safety Pipeline
-
-Every move command passes through local checks before reaching the robot:
-
-| # | Check | Condition | Action | Reason Code |
-|---|-------|-----------|--------|-------------|
-| 1 | Battery | < 10% | DENY | `BATT-001` |
-| 2 | Tilt | > 20° | DENY | `TILT-001` |
-| 3 | Human proximity | < 1.5 m | DENY | `HUMAN-001` |
-| 4 | Human proximity | < 2.5 m | LIMIT speed to 0.1 m/s | `HUMAN-002` |
-| 5 | Speed | > 0.8 m/s | CLAMP | `SPEED-001` |
-| 6 | Angular velocity | > 1.0 rad/s | CLAMP | `ANG-001` |
-| 7 | Obstacle | < 0.5 m | DENY | `OBS-001` |
-
-The pipeline is synchronous and deterministic — no ML, no network calls.
-
----
-
-## Environment Variables
+### Common bridge vars
 
 | Variable | Default | Description |
-|----------|---------|-------------|
-| `ADAPTER_TYPE` | `mock` | Adapter: `mock`, `http`, or `h1` |
-| `ROBOT_URL` | `http://192.168.1.100:8000` | Robot API base URL (N2: port 8000, H1: port 8081) |
-| `BRIDGE_PORT` | `8080` | Port to listen on |
-| `POLL_HZ` | `10` | Telemetry poll frequency (Hz) |
-| `WORKSTATION_URL` | `http://localhost:8888` | Trust Layer platform URL for sync |
-| `DATA_DIR` | `/data` | Data directory for logs and knowledge base |
-| `DECISION_LOG_URL` | _(empty)_ | Optional: URL of Decision Log service |
-| `ACTIVATION_SERVER` | _(built-in)_ | License activation server URL |
+|---|---|---|
+| `ADAPTER_TYPE` | `mock` | `mock`, `http`, `h1`, `e1` |
+| `ROBOT_URL` | adapter-specific | Base URL of robot-facing server |
+| `BRIDGE_PORT` | `8080` | Trust Layer bridge port |
 
----
+### E1 server vars
 
-## Connecting to Trust Layer Platform
+| Variable | Default | Description |
+|---|---|---|
+| `E1_SERVER_PORT` | `8083` | E1 low-level server port |
+| `E1_TRANSPORT` | `auto` | `noetix_dds`, `ros2`, `sim` |
+| `E1_SDK_ROOT` | auto-detect | Noetix SDK root |
+| `E1_DDS_CONFIG_PATH` | auto-detect | Path to `dds.xml` |
+| `E1_SDK_LIB_DIR` | auto-detect | SDK libs dir |
+| `E1_DDS_HELPER_PATH` | auto-detect | Native helper path |
+| `IFLYTEK_APP_ID` | empty | Optional iFlytek integration |
+| `IFLYTEK_API_KEY` | empty | Optional iFlytek integration |
+| `IFLYTEK_API_SECRET` | empty | Optional iFlytek integration |
 
-The bridge is called by the Operator UI (`operator_ui` service).
-Set the bridge URL in the platform:
+## E1 Wi-Fi Notes
+
+Wi-Fi setup was one of the main operational issues during bring-up.
+
+What was confirmed:
+- Jetson can join Wi-Fi with `nmcli`
+- SSH over Wi-Fi works once robot and operator laptop are on the same non-isolated WLAN
+- guest networks may give internet access but still block SSH/HTTP between clients
+
+Recommended Jetson commands:
 
 ```bash
-# In trust-layer platform docker-compose or .env
-FLEET_BRIDGE_URLS=http://<robot-ip>:8080
+sudo nmcli dev wifi list
+sudo nmcli dev wifi connect "KUPIROBOT" password "Kupirobot"
+hostname -I
 ```
 
-Connection flow:
-```
-Operator UI (port 8893)
-    │
-    ├── GET /api/fleet          → polls /robot/state
-    ├── POST /api/fleet/0/move  → /robot/move (through safety pipeline)
-    ├── GET /api/fleet/0/capabilities → /robot/capabilities (+ ROS2 discovery)
-    └── POST /api/chat          → LLM chat with capability-aware responses
+Useful diagnostics:
+
+```bash
+ping -c 1 8.8.8.8
+sudo systemctl status ssh --no-pager
+ss -ltnp | grep :22
 ```
 
----
+Operational guidance:
+- prefer the main office/home SSID over `Guest`
+- if `Guest` must be used, disable client isolation / AP isolation first
+- do not remove LAN until SSH and health checks work over Wi-Fi
+- after moving to Wi-Fi, verify both `ssh noetix@<wifi-ip>` and `curl http://<wifi-ip>:8083/health`
 
-## ROS2 Discovery
+## Jetson Speech
 
-When `ros2` is available on the robot, `/robot/capabilities` automatically runs:
-- `ros2 topic list -t` — discovers active topics
-- `ros2 node list` — discovers running nodes
+The fastest confirmed speech path on E1 is local TTS on Jetson, independent of Trust Layer.
 
-Topics are mapped to capability keys: camera, lidar, IMU, odometry, navigation, mapping, etc.
-Results appear in the `ros_discovery` field of the capabilities response.
+Install:
 
----
+```bash
+sudo apt update
+sudo apt install -y espeak-ng ffmpeg
+```
 
-## License
+Verify Russian voice:
 
-Trust Layer Robot Bridge is part of the Trust Layer platform.
+```bash
+espeak-ng --voices | grep -i ru
+espeak-ng -v ru "Привет. Я робот E1. Русский голос работает."
+```
+
+Use through `e1_server`:
+
+```bash
+curl -s -X POST "http://127.0.0.1:8083/api/audio/speak" \
+  -H "Content-Type: application/json" \
+  -d '{"text":"Привет. Я робот E1. Русский голос работает.","lang":"ru"}'
+```
+
+Expected response:
+
+```json
+{"status":"ok","method":"espeak","spoken":"Привет. Я робот E1. Русский голос работает."}
+```
+
+See also:
+- [docs/JETSON_LOCAL_AI.md](docs/JETSON_LOCAL_AI.md)
+- [docs/OPERATOR_E1.md](docs/OPERATOR_E1.md)
+
+## Bringing Trust Layer Online
+
+Once `e1_server` is up:
+
+```bash
+cd /home/noetix/trust-layer-robot-bridge-
+ADAPTER_TYPE=e1 ROBOT_URL=http://127.0.0.1:8083 BRIDGE_PORT=8080 python3 -m bridge.main
+```
+
+Quick checks:
+
+```bash
+curl -s http://127.0.0.1:8080/health
+curl -s http://127.0.0.1:8080/brain/status
+curl -s -X POST "http://127.0.0.1:8080/chat" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"Привет, как тебя зовут?"}'
+```
+
+## Notes
+
+- `scripts/e1_dialog.py` can use `:8080/chat` for text replies and `:8083/api/audio/speak` for voice output.
+- Local full-offline stack under evaluation on Jetson Orin: `Piper` for TTS, `faster-whisper` for STT, `Qwen2.5-3B-Instruct` via `llama.cpp` for LLM.

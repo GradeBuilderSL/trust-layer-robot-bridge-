@@ -26,14 +26,37 @@ _gate = None          # ActionGate singleton or None
 _rules_loaded = 0     # count of rules loaded from YAML
 
 def _try_load_action_gate():
-    """Attempt to import ActionGate from libs/ontology. Returns gate or None."""
+    """Attempt to import ActionGate from libs/ontology. Returns gate or None.
+
+    API note: we previously reached into `gate._engine._loader._rules` to
+    count rules, which hasn't been the real attribute path in ActionGate
+    since RuleEngine was refactored — every bridge startup was silently
+    falling through to the 6-rule fallback and reporting it in /health.
+    The fix uses the documented `gate.engine.rules` attribute (alias
+    `gate.rule_engine`) which ActionGate has exposed since the refactor.
+    """
     global _gate, _rules_loaded
     if _LIBS_DIR and _LIBS_DIR not in sys.path:
         sys.path.insert(0, _LIBS_DIR)
     try:
         from ontology.action_gate import ActionGate  # noqa: PLC0415
         gate = ActionGate()
-        _rules_loaded = len(gate._engine._loader._rules)  # type: ignore[attr-defined]
+        # Preferred: documented attribute exposed by ActionGate.
+        engine = getattr(gate, "engine", None) or getattr(gate, "rule_engine", None)
+        rules = getattr(engine, "rules", None) if engine is not None else None
+        if rules is None:
+            # Fallback path for older ActionGate variants that keep rules
+            # on a loader object. Defensive — do not crash on either shape.
+            loader = getattr(engine, "_loader", None) if engine is not None else None
+            rules = getattr(loader, "_rules", None) if loader is not None else None
+        _rules_loaded = len(rules) if rules is not None else 0
+        if _rules_loaded == 0:
+            logger.warning(
+                "safety_pipeline: ActionGate loaded but 0 rules found — "
+                "check libs/ontology/rules/ mount (libs=%s)",
+                _LIBS_DIR,
+            )
+            return None
         logger.info(
             "safety_pipeline: ActionGate loaded — %d rules from YAML (libs=%s)",
             _rules_loaded, _LIBS_DIR,
@@ -108,6 +131,10 @@ class SafetyPipeline:
         self._lock = threading.Lock()
         self._reasoning: list[ReasoningMessage] = []
         self._cooldowns: dict[str, float] = {}
+        # Dynamic envelopes tighten velocity/force limits per-request based
+        # on environment signals (obstacles, humans, zones). SINT-inspired.
+        # See libs/safety/dynamic_envelope.py for the plugin protocol.
+        self._envelopes: list = []
         self._stats = {
             "total_checks": 0,
             "denied": 0,
@@ -115,7 +142,61 @@ class SafetyPipeline:
             "allowed": 0,
             "rules_backend": "action_gate" if _gate else "fallback_6_rules",
             "rules_loaded": _rules_loaded if _gate else 8,
+            "envelopes_registered": 0,
+            "envelope_tightenings": 0,
         }
+
+    def register_envelope(self, envelope) -> None:
+        """Register a DynamicEnvelope plugin. Plugins compose: tightest wins."""
+        with self._lock:
+            self._envelopes.append(envelope)
+            self._stats["envelopes_registered"] = len(self._envelopes)
+        logger.info("safety_pipeline: registered envelope %s", type(envelope).__name__)
+
+    def _apply_envelopes(
+        self, vx: float, vy: float, wz: float,
+        robot_state: dict, entities: list[dict],
+    ) -> tuple[float, float, float, str]:
+        """Let each registered envelope tighten the velocity cap. Returns
+        (new_vx, new_vy, new_wz, reason). reason is empty when no tightening.
+        """
+        with self._lock:
+            envelopes = list(self._envelopes)
+        if not envelopes:
+            return vx, vy, wz, ""
+
+        request = {
+            "vx": vx, "vy": vy, "wz": wz,
+            "robot_state": robot_state,
+            "entities": entities,
+        }
+        tightest_v: float | None = None
+        reasons: list[str] = []
+        for env in envelopes:
+            try:
+                ov = env.compute(request)
+            except Exception as exc:
+                logger.debug("envelope %s failed: %s", type(env).__name__, exc)
+                continue
+            if ov.max_velocity_mps is not None:
+                if tightest_v is None or ov.max_velocity_mps < tightest_v:
+                    tightest_v = ov.max_velocity_mps
+                if ov.reason:
+                    reasons.append(ov.reason)
+        if tightest_v is None:
+            return vx, vy, wz, ""
+
+        speed = math.hypot(vx, vy)
+        if speed <= tightest_v + 1e-6:
+            return vx, vy, wz, ""
+        if tightest_v <= 1e-6:
+            with self._lock:
+                self._stats["envelope_tightenings"] += 1
+            return 0.0, 0.0, wz, "; ".join(reasons) or "envelope hard-stop"
+        scale = tightest_v / speed
+        with self._lock:
+            self._stats["envelope_tightenings"] += 1
+        return vx * scale, vy * scale, wz, "; ".join(reasons) or "envelope"
 
     def check(
         self,
@@ -129,6 +210,27 @@ class SafetyPipeline:
 
         Fail-closed: any exception → DENY with reason SAFETY_CHECK_ERROR.
         """
+        # Pre-validation: NaN and Inf velocity inputs are an attack vector.
+        # If they slip past the pipeline, the adapter sends garbage to the
+        # actuator (NaN packet on CAN bus = motor controller fault). We
+        # short-circuit DENY here so neither the rule engine nor the
+        # downstream clamp ever sees them.
+        for name, val in (("vx", vx), ("vy", vy), ("wz", wz)):
+            if not isinstance(val, (int, float)) or not math.isfinite(val):
+                with self._lock:
+                    self._stats["denied"] += 1
+                self._emit(
+                    "nan_velocity",
+                    f"Отказ: {name}={val!r} не является конечным числом. Команда отвергнута.",
+                    8.0,
+                )
+                return 0.0, 0.0, 0.0, GateResult(
+                    decision="DENY",
+                    reason=f"non-finite velocity: {name}={val!r}",
+                    rule_id="INPUT-VALIDATION-001",
+                    audit_ref="ISO 13849-1 §4.5.4 (input plausibility)",
+                )
+
         try:
             return self._check_inner(vx, vy, wz, robot_state, entities)
         except Exception as exc:
@@ -154,8 +256,36 @@ class SafetyPipeline:
             self._stats["total_checks"] += 1
 
         if _gate is not None:
-            return self._check_via_action_gate(vx, vy, wz, robot_state, entities)
-        return self._check_fallback(vx, vy, wz, robot_state, entities)
+            nvx, nvy, nwz, result = self._check_via_action_gate(
+                vx, vy, wz, robot_state, entities,
+            )
+        else:
+            nvx, nvy, nwz, result = self._check_fallback(
+                vx, vy, wz, robot_state, entities,
+            )
+
+        # DynamicEnvelope post-pass: tighten (never loosen) the allowed
+        # velocity based on environment signals. Does not override DENY.
+        if result.decision == "DENY":
+            return nvx, nvy, nwz, result
+        enx, eny, enz, env_reason = self._apply_envelopes(
+            nvx, nvy, nwz, robot_state, entities,
+        )
+        if env_reason:
+            # Tightened — emit as LIMIT with envelope audit tag.
+            self._emit("envelope_tighten", f"Envelope: {env_reason}", 3.0)
+            return enx, eny, enz, GateResult(
+                decision="LIMIT",
+                reason=f"envelope: {env_reason}",
+                rule_id="ENVELOPE-DYNAMIC-001",
+                audit_ref="SINT-inspired DynamicEnvelope (reaction_factor)",
+                params={
+                    "envelope_vx": enx,
+                    "envelope_vy": eny,
+                    "original_decision": result.decision,
+                },
+            )
+        return nvx, nvy, nwz, result
 
     # ── ActionGate path (131 YAML rules) ─────────────────────────────────
 

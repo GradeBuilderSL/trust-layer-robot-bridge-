@@ -139,6 +139,14 @@ class HttpAdapter(RobotAdapter):
             self.connected = True
             pos = data.get("position", {})
             vel = data.get("velocity", {})
+            # Forward joint_positions when the upstream bridge supplies
+            # them. Trust Layer's task_executor uses joint_positions to
+            # detect motion when base odometry is missing — without
+            # this passthrough every walking command would report
+            # "Δjoints=0.00" and the operator would think the robot
+            # didn't move even when its legs were stepping.
+            joint_positions = data.get("joint_positions") or []
+            joint_names = data.get("joint_names") or []
             return {
                 "position": {
                     "x": float(pos.get("x", 0)),
@@ -159,6 +167,8 @@ class HttpAdapter(RobotAdapter):
                 "mode": data.get("mode", "ADVISORY"),
                 "timestamp_s": time.time(),
                 "adapter": "http",
+                "joint_positions": [float(j) for j in joint_positions],
+                "joint_names": list(joint_names),
             }
         else:
             # Noetix N2 format
@@ -197,9 +207,9 @@ class HttpAdapter(RobotAdapter):
             # Isaac Sim: POST /control/move {"vx", "vy", "wz"}
             result = self._post("/control/move", {"vx": vx, "vy": vy, "wz": wz})
         else:
-            # Noetix N2: POST /api/cmd/velocity?vx=...&vy=...&wz=...
+            # Noetix N2 — non-holonomic, vy not supported
             result = self._post(
-                f"/api/cmd/velocity?vx={vx:.3f}&vy={vy:.3f}&wz={wz:.3f}", {}
+                f"/api/cmd/velocity?vx={vx:.3f}&vy=0.000&wz={wz:.3f}", {}
             )
 
         if result is not None:
@@ -309,8 +319,22 @@ class HttpAdapter(RobotAdapter):
                 if "json" not in ct and "text/html" in ct:
                     return None  # HTML page, not JSON API
                 return json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            # 404 = endpoint not implemented by this bridge — not a connectivity loss.
+            self._last_error = f"http:{e.code}"
+            if e.code != 404:
+                self.connected = False
+            return None
+        except urllib.error.URLError as e:
+            self._last_error = f"network:{e}"
+            self.connected = False
+            return None
+        except json.JSONDecodeError as e:
+            self._last_error = f"json:{e}"
+            self.connected = False
+            return None
         except Exception as e:
-            self._last_error = str(e)
+            self._last_error = f"unknown:{e}"
             self.connected = False
             return None
 
@@ -325,8 +349,16 @@ class HttpAdapter(RobotAdapter):
             self._apply_auth(req)
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 return json.loads(resp.read())
+        except urllib.error.URLError as e:
+            self._last_error = f"network:{e}"
+            self.connected = False
+            return None
+        except json.JSONDecodeError as e:
+            self._last_error = f"json:{e}"
+            self.connected = False
+            return None
         except Exception as e:
-            self._last_error = str(e)
+            self._last_error = f"unknown:{e}"
             self.connected = False
             return None
 
@@ -420,7 +452,7 @@ class HttpAdapter(RobotAdapter):
                         "data": data,
                     })
                     if result is None:
-                        # Fallback: try /api/joints for Noetix-style robots
+                        logger.info("FollowJointTrajectory /robot/action failed, trying /api/joints fallback")
                         result = self._post("/api/joints", {"data": data})
                     return result or {"status": "ok", "action": "joint_trajectory"}
                 else:
