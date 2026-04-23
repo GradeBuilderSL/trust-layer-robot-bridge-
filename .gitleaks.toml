@@ -1,0 +1,78 @@
+# gitleaks config — tuned for Trust Layer.
+#
+# Covers the rules we actually care about + extends the built-in
+# defaults. Run:
+#   gitleaks protect --staged --config .gitleaks.toml
+#   gitleaks detect  --config .gitleaks.toml   (scan full history)
+
+title = "Trust Layer secret-scan rules"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id          = "wifi-password-inline"
+description = "Wi-Fi password passed to nmcli as a literal (e.g. `nmcli ... password \"Kupirobot\"`) — use placeholders like <WIFI_PASSWORD> in docs."
+regex       = '''nmcli.*wifi connect.*password\s+["'][^<$"'][^"']{2,}["']'''
+tags        = ["wifi", "credentials"]
+
+[[rules]]
+id          = "bearer-token-inline"
+description = "Hardcoded Authorization: Bearer <long-value>"
+regex       = '''Authorization:\s*Bearer\s+[A-Za-z0-9._\-]{20,}'''
+tags        = ["http", "auth"]
+
+[[rules]]
+id          = "anthropic-api-key"
+description = "Anthropic API key"
+regex       = '''sk-ant-[A-Za-z0-9_\-]{40,}'''
+tags        = ["api-key", "anthropic"]
+
+[[rules]]
+id          = "openai-api-key"
+description = "OpenAI API key"
+regex       = '''sk-[A-Za-z0-9]{48,}'''
+tags        = ["api-key", "openai"]
+
+[[rules]]
+id          = "dashscope-api-key"
+description = "Alibaba DashScope API key"
+regex       = '''sk-[a-f0-9]{32}'''
+tags        = ["api-key", "alibaba"]
+
+[[rules]]
+id          = "deepseek-api-key"
+description = "DeepSeek API key"
+regex       = '''sk-[a-zA-Z0-9]{32,}'''
+tags        = ["api-key", "deepseek"]
+
+[[rules]]
+id          = "generic-secret-assignment"
+description = "Inline assignment of a secret-looking key (api_key, token, password, etc)"
+regex       = '''(?i)(api[_-]?key|password|passwd|secret|token)\s*[:=]\s*["'][A-Za-z0-9+/_\-]{20,}["']'''
+tags        = ["generic"]
+
+[[rules]]
+id          = "private-key-pem"
+description = "PEM private-key material"
+regex       = '''-----BEGIN (?:RSA |DSA |EC |OPENSSH |PGP )?PRIVATE KEY-----'''
+tags        = ["pki"]
+
+[allowlist]
+description = "Known-safe strings that match by pattern but are placeholders"
+regexes = [
+    '''<[A-Z_]+>''',                      # <WIFI_PASSWORD>, <SSID>, <API_KEY>, ...
+    '''\$\{[A-Z_]+''',                    # ${ROBOT_API_KEY:-}, etc.
+    '''os\.(getenv|environ)\(''',         # os.getenv("DEEPSEEK_API_KEY")
+    '''default''',
+    '''example''',
+    '''placeholder''',
+    '''sk-ant-api\d+-(example|test|\.\.\.)''',
+]
+paths = [
+    '''\.venv/''',
+    '''install/''',
+    '''node_modules/''',
+    '''\.dashscope_env/''',
+    '''tests/fixtures/''',
+]

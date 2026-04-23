@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# Pre-commit secret scanner. Runs gitleaks if available; otherwise
+# falls back to a small grep-based scan for the leak patterns we've
+# actually hit in this repo (Wi-Fi passwords, Bearer tokens, etc.)
+#
+# Activate with:
+#   git config --local core.hooksPath .githooks
+#
+# Bypass once (rare, emergency only):
+#   git commit --no-verify ...
+
+set -e
+
+RED="\033[1;31m"
+YEL="\033[1;33m"
+GRN="\033[1;32m"
+RST="\033[0m"
+
+fail_leak() {
+    printf "${RED}blocked:${RST} %s\n" "$1"
+    printf "${YEL}bypass:${RST}  git commit --no-verify  (only if you're sure)\n"
+    exit 1
+}
+
+if command -v gitleaks >/dev/null 2>&1; then
+    printf "${GRN}gitleaks${RST} scanning staged changes…\n"
+    if ! gitleaks protect --staged --redact --no-banner \
+            --config "$(git rev-parse --show-toplevel)/.gitleaks.toml" 2>&1; then
+        fail_leak "gitleaks found a secret in staged files"
+    fi
+    exit 0
+fi
+
+# Fallback: grep-based scan on the staged diff. Catches the common
+# shapes we've already hit (nmcli plaintext wifi, Bearer tokens, raw
+# API keys, BEGIN PRIVATE KEY). Not a replacement for gitleaks, but
+# stops the most obvious mistakes while developers install it.
+printf "${YEL}warn:${RST} gitleaks not found — running fallback grep scan.\n"
+printf "      install: https://github.com/gitleaks/gitleaks  (brew/apt/go install)\n"
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$staged" ] && exit 0
+
+# Files that describe the leak patterns themselves — skip to avoid
+# the hook blocking its own config.
+leaks=0
+scan_diff() {
+    git diff --cached -U0 --no-color \
+        -- . ':(exclude).githooks/pre-commit' ':(exclude).gitleaks.toml'
+}
+
+# Scan diff for patterns
+while IFS= read -r line; do
+    case "$line" in
+        *"nmcli"*"wifi connect"*"password"*)
+            # Inline wifi password with literal value
+            if printf '%s' "$line" | grep -qE 'password[[:space:]]+"[^<$][^"]{3,}"|password[[:space:]]+[^$<"[:space:]][^[:space:]]+'; then
+                echo "$line" | grep -E 'nmcli.*wifi connect.*password' >&2 || true
+                leaks=$((leaks+1))
+            fi
+            ;;
+        *"Authorization:"*"Bearer"*)
+            # Hardcoded bearer token (longer than 20 chars, not a placeholder)
+            if printf '%s' "$line" | grep -qE 'Bearer [A-Za-z0-9._\-]{20,}' \
+               && ! printf '%s' "$line" | grep -qE '<[A-Z_]+>|\${|%%|\.\.\.'; then
+                leaks=$((leaks+1))
+                printf "${RED}hit:${RST} hardcoded Bearer token: %s\n" "$line" >&2
+            fi
+            ;;
+        *"-----BEGIN "*"PRIVATE KEY"*)
+            leaks=$((leaks+1))
+            printf "${RED}hit:${RST} private key material: %s\n" "$line" >&2
+            ;;
+    esac
+    # Generic high-entropy key-looking patterns
+    if printf '%s' "$line" | grep -qE '(api[_-]?key|secret|token|password)[[:space:]]*[:=][[:space:]]*["\x27][A-Za-z0-9+/_\-]{20,}["\x27]' \
+       && ! printf '%s' "$line" | grep -qE 'os\.(getenv|environ)|<[A-Z_]+>|\${|EXAMPLE|placeholder|default' ; then
+        leaks=$((leaks+1))
+        printf "${RED}hit:${RST} inline secret-looking value: %s\n" "$line" >&2
+    fi
+done < <(scan_diff | grep -E '^\+' | grep -vE '^\+\+\+')
+
+if [ "$leaks" -gt 0 ]; then
+    fail_leak "$leaks probable secret(s) in staged diff (fallback scanner)"
+fi
+
+exit 0
