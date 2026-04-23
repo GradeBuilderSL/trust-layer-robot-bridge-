@@ -100,7 +100,7 @@ python3 scripts/e1_collect_telemetry.py \
 
 ```bash
 sudo nmcli dev wifi list
-sudo nmcli dev wifi connect "KUPIROBOT" password "Kupirobot"
+sudo nmcli dev wifi connect "<SSID>" password "<WIFI_PASSWORD>"
 hostname -I
 ssh noetix@<wifi-ip>
 curl http://<wifi-ip>:8083/health

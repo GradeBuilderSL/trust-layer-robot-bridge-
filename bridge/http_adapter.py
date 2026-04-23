@@ -13,7 +13,6 @@ Optional auth (OEM HTTP API, e.g. Noetix on :8080):
 """
 import json
 import logging
-import os
 import math
 import os
 import time
