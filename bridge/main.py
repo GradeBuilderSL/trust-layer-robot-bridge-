@@ -69,6 +69,12 @@ try:
     # taxonomy escalates misbehaving agents automatically.
     from safety.agent_trust import AgentTrustTracker  # type: ignore[import-not-found]
     from safety.forbidden_combos import ForbiddenCombosDetector  # type: ignore[import-not-found]
+    # HITL — synchronous operator-in-the-loop approvals. We reuse it
+    # for the ISO 13482 §5.7.2 speed-near-human gate: when a move
+    # command requests speed > 0.5 m/s with a person within 1.5 m,
+    # the bridge blocks here until the operator approves / denies via
+    # /hitl/respond. Timeout → safe deny.
+    from safety.human_in_the_loop import HumanInTheLoop  # type: ignore[import-not-found]
     _TIERS_LOADED = True
 except Exception as _tier_exc:
     _TIERS_LOADED = False
@@ -101,6 +107,12 @@ except Exception as _tier_exc:
 
 # ── Shared trust tracker + forbidden-combo detector ───────────────────────
 _trust_tracker = AgentTrustTracker() if AgentTrustTracker is not None else None
+# HITL queue — used by the speed-near-human gate on /robot/action.
+# None if libs/ isn't mounted (older deployments); the gate checks
+# this and falls through to the standard DENY path when absent.
+_hitl: Optional["HumanInTheLoop"] = (
+    HumanInTheLoop() if _TIERS_LOADED else None
+)
 _forbidden_combos = ForbiddenCombosDetector() if ForbiddenCombosDetector is not None else None
 
 
@@ -258,6 +270,115 @@ WATCHDOG_TIMEOUT_MS = int(os.getenv("WATCHDOG_TIMEOUT_MS", "800"))
 
 
 # ── Decision log push ─────────────────────────────────────────────────────
+
+# ── Speed-near-human HITL helper ──────────────────────────────────────
+# Called from BOTH /robot/action and /robot/move so every path that can
+# drive the robot runs through the same ISO 13482 §5.7.2 check. Returns
+# a dict describing the outcome:
+#   None            — gate didn't apply (no humans nearby or speed < 0.5
+#                      or HITL not wired)
+#   {blocked:False} — operator approved; caller proceeds. Decision row
+#                      already written to decision_log.
+#   {blocked:True}  — operator denied / timed out; caller must return a
+#                      denial response (with hitl meta).
+
+_MOVEMENT_ACTION_TYPES = {
+    "move", "navigate_to", "move_to", "move_relative",
+    "move_forward", "escort", "escort_to_poi", "patrol",
+}
+_SPEED_NEAR_HUMAN_RADIUS_M = 2.0
+_SPEED_NEAR_HUMAN_LIMIT_MPS = 0.5
+
+
+def _speed_near_human_hitl_check(
+    action_label: str,
+    action_type_for_movement: str,
+    speed_mps: float,
+    entities: list,
+    robot_id: str,
+    tier: str,
+    trace_id: str,
+    override: bool = False,
+) -> Optional[dict]:
+    """Fire the ISO 13482 §5.7.2 HITL gate. See module comment above."""
+    if _hitl is None or override:
+        return None
+    if action_type_for_movement not in _MOVEMENT_ACTION_TYPES:
+        return None
+    if speed_mps <= _SPEED_NEAR_HUMAN_LIMIT_MPS:
+        return None
+    near = [
+        e for e in entities
+        if (e.get("is_human") or e.get("class_name") == "person")
+        and float(e.get("distance_m", 999)) < _SPEED_NEAR_HUMAN_RADIUS_M
+    ]
+    if not near:
+        return None
+    nearest = min(float(h.get("distance_m", 999)) for h in near)
+    person = near[0].get("entity_id") or "person"
+    situation = (
+        f"Requested speed {speed_mps:.2f} m/s within {nearest:.2f} m "
+        f"of {person}. ISO 13482:2014 §5.7.2 limits robot speed near "
+        f"an assisted person to 0.5 m/s. Operator approval required."
+    )
+    logger.warning("HITL GATE: %s", situation)
+    resp = _hitl.request_approval(
+        robot_id=robot_id,
+        situation=situation,
+        risk_score=min(1.0, speed_mps / 1.5),
+        rule_id="ISO13482-SPEED-NEAR-HUMAN-001",
+        recommendation=(
+            "Reduce to 0.4 m/s, or approve override only if operator has "
+            "confirmed the path is clear and the person consents."
+        ),
+        options=[
+            {"id": "approve", "description":
+                "Approve this one action (operator takes responsibility)"},
+            {"id": "deny", "description":
+                "Deny — robot holds position (default safe)"},
+        ],
+        timeout_s=30.0,
+    )
+    meta = {
+        "request_id": resp.request_id,
+        "decision": resp.decision,
+        "note": resp.operator_note,
+        "rule_id": "ISO13482-SPEED-NEAR-HUMAN-001",
+        "audit_ref": "ISO 13482:2014 §5.7.2",
+        "nearest_human_m": round(nearest, 2),
+        "requested_speed_mps": round(speed_mps, 2),
+    }
+    if resp.decision not in ("approve", "approve_remember"):
+        class _HitlDeny:
+            decision = "DENY"
+            reason = f"HITL denied: {resp.operator_note or 'timeout_safe_fallback'}"
+            rule_id = "ISO13482-SPEED-NEAR-HUMAN-001"
+            audit_ref = "ISO 13482:2014 §5.7.2"
+            params: dict = {}
+        _push_decision(robot_id, f"{action_label} (HITL blocked)",
+                       _HitlDeny(), trace_id=trace_id, tier=tier)
+        if _trust_tracker is not None:
+            _trust_tracker.record(
+                robot_id, "hitl_deny",
+                f"{action_type_for_movement} @ {speed_mps:.2f}mps near human",
+            )
+        meta["blocked"] = True
+        return meta
+
+    logger.info("HITL APPROVED: %s — proceeding with %s @ %.2f m/s",
+                resp.request_id, action_type_for_movement, speed_mps)
+
+    class _HitlApprove:
+        decision = "ALLOW"
+        reason = f"HITL override: {resp.operator_note or 'approved'}"
+        rule_id = "ISO13482-SPEED-NEAR-HUMAN-001"
+        audit_ref = "ISO 13482:2014 §5.7.2"
+        params: dict = {}
+    _push_decision(robot_id, f"{action_label} (HITL approved)",
+                   _HitlApprove(), trace_id=trace_id, tier=tier)
+    meta["blocked"] = False
+    return meta
+
 
 def _push_decision(robot_id: str, command: str, gate, trace_id: str = "", tier: str = "") -> None:
     """Push GateResult to central decision_log asynchronously (fire-and-forget)."""
@@ -657,6 +778,36 @@ def robot_move(req: MoveRequest, request: Request = None):
         state = dict(_latest_state)
         entities = list(_latest_entities)
 
+    # ── Speed-near-human HITL (ISO 13482 §5.7.2) ────────────────────
+    # task_executor's move / move_forward / navigate_to fall-through
+    # dispatches here with speed packed into vx. The gate blocks if
+    # a person is within 2 m and requested speed > 0.5 m/s, same
+    # logic as /robot/action.
+    _req_speed = math.hypot(req.vx, req.vy)
+    _hitl_meta = _speed_near_human_hitl_check(
+        action_label="move",
+        action_type_for_movement="move",
+        speed_mps=_req_speed,
+        entities=entities,
+        robot_id=state.get("robot_id", state.get("name", f"bridge-{ADAPTER_TYPE}")),
+        tier=T2_ACT,
+        trace_id=trace_id,
+    )
+    if _hitl_meta and _hitl_meta.get("blocked"):
+        return {
+            "requested": {"vx": req.vx, "vy": req.vy, "wz": req.wz},
+            "applied": {"vx": 0.0, "vy": 0.0, "wz": 0.0},
+            "gate": {
+                "decision": "DENY",
+                "reason": f"HITL denied: {_hitl_meta.get('note') or 'timeout'}",
+                "rule_id": "ISO13482-SPEED-NEAR-HUMAN-001",
+                "audit_ref": "ISO 13482:2014 §5.7.2",
+                "params": {},
+            },
+            "send": {"status": "denied_hitl"},
+            "hitl": _hitl_meta,
+        }
+
     # Run safety pipeline
     vx, vy, wz, gate = _pipeline.check(
         req.vx, req.vy, req.wz, state, entities,
@@ -765,6 +916,43 @@ def robot_reasoning():
     """Recent safety reasoning messages."""
     msgs = _pipeline.get_reasoning(clear=True)
     return {"messages": msgs, "count": len(msgs)}
+
+
+# ── HITL (Human-in-the-Loop) approvals ─────────────────────────────────
+# The speed-near-human gate on /robot/action raises ApprovalRequests
+# into the HITL queue when a move violates ISO 13482 §5.7.2. Operator
+# UIs poll /hitl/pending and submit decisions via /hitl/respond.
+
+@app.get("/hitl/pending")
+def hitl_pending(robot_id: str = ""):
+    """List approval requests awaiting operator decision."""
+    if _hitl is None:
+        return {"pending": [], "available": False}
+    return {"pending": _hitl.get_pending(robot_id=robot_id), "available": True}
+
+
+class HitlResponseRequest(BaseModel):
+    request_id: str
+    decision: str    # "approve" | "deny" | "approve_remember"
+    operator: str = ""
+    note: str = ""
+
+
+@app.post("/hitl/respond")
+def hitl_respond(req: HitlResponseRequest):
+    """Submit the operator's approval decision. Unblocks the /robot/action
+    call that raised the approval. Decision must be one of approve /
+    deny / approve_remember."""
+    if _hitl is None:
+        raise HTTPException(503, "HITL not available (libs/ not mounted)")
+    if req.decision not in ("approve", "deny", "approve_remember"):
+        raise HTTPException(400, f"Unknown decision: {req.decision}")
+    note = req.note or (f"operator={req.operator}" if req.operator else "")
+    ok = _hitl.submit_response(req.request_id, req.decision, note=note)
+    if not ok:
+        raise HTTPException(404, f"No pending request with id {req.request_id}")
+    return {"ok": True, "request_id": req.request_id,
+            "decision": req.decision}
 
 
 @app.post("/scenario/inject")
@@ -930,6 +1118,33 @@ def robot_action(req: ActionRequest, request: Request = None):
                action_type=atype, tier=_tier_info.tier,
                base_tier=_tier_info.base_tier,
                escalations=len(_tier_info.escalations))
+
+    # ── Speed-near-human HITL gate (ISO 13482 §5.7.2) ────────────────────
+    _req_speed = (req.target_speed_mps or req.speed_mps or req.speed
+                  or float((req.params or {}).get("speed", 0.0))
+                  or float((req.params or {}).get("speed_mps", 0.0)))
+    _hitl_override = bool((req.params or {}).get("hitl_override", False))
+    _hitl_meta = _speed_near_human_hitl_check(
+        action_label=f"action:{atype}",
+        action_type_for_movement=atype,
+        speed_mps=_req_speed,
+        entities=_ents,
+        robot_id=req.robot_id or f"bridge-{ADAPTER_TYPE}",
+        tier=_tier_info.tier,
+        trace_id=trace_id,
+        override=_hitl_override,
+    )
+    if _hitl_meta and _hitl_meta.get("blocked"):
+        return {
+            "status": "denied",
+            "action_id": req.action_id,
+            "action_type": atype,
+            "reason": f"Operator denied (HITL): {_hitl_meta.get('note') or 'timeout'}",
+            "rule_id": "ISO13482-SPEED-NEAR-HUMAN-001",
+            "audit_ref": "ISO 13482:2014 §5.7.2",
+            "tier": _tier_info.tier,
+            "hitl": _hitl_meta,
+        }
 
     # ── stop / e_stop ────────────────────────────────────────────────────
     if atype in ("stop", "e_stop"):

@@ -120,10 +120,12 @@ class MujocoAdapter(RobotAdapter):
     def get_entities(self) -> list[dict]:
         """MuJoCo scene objects reported as Trust Layer entities.
 
-        Cubes map to `class_name="cube"`, zones to `class_name="zone"`.
-        `is_human=False` — MuJoCo G1 demo has no humans in the room.
-        task_executor uses this list for proximity / visibility
-        heuristics (e.g. obstacle distance in velocity-duration moves).
+        Humans become `is_human=True, class_name="person"` so the
+        ISO 13482 §5.7.2 speed-near-human rule can key on them.
+        Cubes → `class_name="cube"`, zones → `class_name="zone"`.
+        task_executor uses this list for proximity checks; the robot
+        bridge's action_pipeline / HITL escalation reads `is_human`
+        + `distance_m` to enforce the speed-near-human envelope.
         """
         scene = self._get("/scene/objects") or {}
         out: list[dict] = []
@@ -131,6 +133,19 @@ class MujocoAdapter(RobotAdapter):
         pos = (state.get("position") or {})
         rx = float(pos.get("x", 0.0))
         ry = float(pos.get("y", 0.0))
+        # Humans first — most safety-critical + shortest list.
+        for h in scene.get("humans") or []:
+            hp = h.get("pos") or {}
+            dx = float(hp.get("x", 0.0)) - rx
+            dy = float(hp.get("y", 0.0)) - ry
+            out.append({
+                "entity_id": h.get("id") or "person",
+                "class_name": h.get("class_name") or "person",
+                "distance_m": round(math.hypot(dx, dy), 2),
+                "is_human": True,
+                "position": hp,
+                "zone": h.get("zone"),
+            })
         for obj in scene.get("objects") or []:
             op = obj.get("pos") or {}
             dx = float(op.get("x", 0.0)) - rx
