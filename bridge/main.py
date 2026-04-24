@@ -47,6 +47,7 @@ from bridge.mock_adapter import MockAdapter
 from bridge.http_adapter import HttpAdapter
 from bridge.h1_adapter import H1Adapter
 from bridge.e1_adapter import E1Adapter
+from bridge.mujoco_adapter import MujocoAdapter
 
 # Tier taxonomy (T0/T1/T2/T3) — lives in libs/safety/tiers.py. Fail-open so
 # bridges without libs/ mounted still work.
@@ -236,10 +237,11 @@ ROBOT_ID = os.getenv("ROBOT_ID", "")      # Unique robot identifier
 # robot_model surfaced to operator_ui /api/fleet. Falls back to a per-adapter
 # default so the operator sees "Noetix E1" instead of "—" without extra config.
 _DEFAULT_MODELS = {
-    "mock": "Mock (Noetix N2 sim)",
-    "http": "Noetix N2",
-    "h1":   "Unitree H1",
-    "e1":   "Noetix E1",
+    "mock":   "Mock (Noetix N2 sim)",
+    "http":   "Noetix N2",
+    "h1":     "Unitree H1",
+    "e1":     "Noetix E1",
+    "mujoco": "Unitree G1 (MuJoCo sim)",
 }
 ROBOT_MODEL = os.getenv("ROBOT_MODEL", _DEFAULT_MODELS.get(ADAPTER_TYPE, ADAPTER_TYPE))
 BRIDGE_PORT = int(os.getenv("BRIDGE_PORT", "8080"))
@@ -389,6 +391,9 @@ def _create_adapter():
     if ADAPTER_TYPE == "e1":
         e1_url = os.getenv("ROBOT_URL", "http://192.168.55.101:8083")
         return E1Adapter(robot_url=e1_url)
+    if ADAPTER_TYPE == "mujoco":
+        mj_url = os.getenv("ROBOT_URL", "http://mujoco_bridge:8000")
+        return MujocoAdapter(robot_url=mj_url)
     return MockAdapter()
 
 
@@ -1100,6 +1105,35 @@ def robot_action(req: ActionRequest, request: Request = None):
             "action_type": atype,
             "result": result,
         }
+
+    # Last-resort: ask the adapter whether it has a native handler for
+    # this action. Adapters like MujocoAdapter expose rich primitives
+    # (find_visual, look_around, describe_scene, head_pan/tilt, rotate,
+    # move_relative) that don't fit the whitelist above but are
+    # legitimate robot capabilities. If the adapter returns a real
+    # status, we pass it through; otherwise fall back to unknown_action.
+    if hasattr(_adapter, "handle_action"):
+        try:
+            adapter_result = _adapter.handle_action(atype, dict(req.params or {}))
+        except Exception as exc:
+            logger.warning("handle_action(%s) fallback failed: %s", atype, exc)
+            adapter_result = None
+        if (adapter_result and
+            adapter_result.get("status") not in (None, "unknown_action")):
+            _push_decision(
+                req.robot_id or f"bridge-{ADAPTER_TYPE}",
+                f"action:{atype}",
+                _AllowGate(),
+                trace_id=trace_id,
+            )
+            return {
+                "status": "ok",
+                "action_id": req.action_id,
+                "action_type": atype,
+                "result": adapter_result,
+                **{k: v for k, v in adapter_result.items()
+                   if k in ("describe", "result", "observations", "target")},
+            }
 
     return {
         "status": "unknown_action",
