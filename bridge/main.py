@@ -256,7 +256,16 @@ _DEFAULT_MODELS = {
     "mujoco": "Unitree G1 (MuJoCo sim)",
 }
 ROBOT_MODEL = os.getenv("ROBOT_MODEL", _DEFAULT_MODELS.get(ADAPTER_TYPE, ADAPTER_TYPE))
-BRIDGE_PORT = int(os.getenv("BRIDGE_PORT", "8080"))
+def _port_from_env() -> int:
+    # Railway injects PORT directly; BRIDGE_PORT is the local default.
+    # Reject a literal "$PORT" placeholder some PaaS auto-config
+    # tools paste verbatim into env vars.
+    for key in ("PORT", "BRIDGE_PORT"):
+        raw = (os.getenv(key) or "").strip()
+        if raw and raw != "$PORT" and not raw.startswith("${"):
+            return int(raw)
+    return 8080
+BRIDGE_PORT = _port_from_env()
 POLL_HZ = int(os.getenv("POLL_HZ", "10"))
 WORKSTATION_URL = os.getenv("WORKSTATION_URL", "http://localhost:8888")
 DATA_DIR = os.getenv("DATA_DIR", "/data")
