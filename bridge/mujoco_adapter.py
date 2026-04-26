@@ -66,6 +66,10 @@ class MujocoAdapter(RobotAdapter):
         self._last_error = ""
         self._timeout = 3.0
         self._caps_cache: dict | None = None
+        # Gesture name cache — populated on first probe_capabilities()
+        # or first handle_action("gesture", …) call, used to refuse
+        # unsupported names without round-tripping the bridge.
+        self._gesture_names_cache: list | None = None
 
     # ── Telemetry ──────────────────────────────────────────────────────
 
@@ -273,12 +277,33 @@ class MujocoAdapter(RobotAdapter):
 
     # ── Capabilities ──────────────────────────────────────────────────
 
+    def _supported_gestures(self) -> list:
+        """List of gesture names this bridge actually implements.
+
+        Reads from the live /robot/state.capability_details. Cached
+        after the first successful response so the per-action lookup
+        is cheap. Falls back to an empty list if the bridge hasn't
+        come up yet — handle_action then refuses every gesture
+        loudly with a clear "unsupported" reply rather than silently
+        firing into a bridge that won't answer.
+        """
+        if self._gesture_names_cache is not None:
+            return self._gesture_names_cache
+        state = self._get("/robot/state") or {}
+        details = state.get("capability_details") or {}
+        gesture_block = details.get("gesture") or {}
+        names = gesture_block.get("names") or []
+        if names:
+            self._gesture_names_cache = list(names)
+        return list(names)
+
     def probe_capabilities(self) -> dict:
         if self._caps_cache is not None:
             return self._caps_cache
         state = self._get("/robot/state") or {}
         sensors = state.get("sensors_available") or {}
         caps_list = state.get("capabilities") or []
+        cap_details = state.get("capability_details") or {}
         connected = bool(state)
         self.connected = connected
         caps = {
@@ -331,6 +356,17 @@ class MujocoAdapter(RobotAdapter):
             "actions": {
                 "available": True,
                 "list": caps_list,
+                # Pass through the detail block published by the
+                # bridge — this is what makes the LLM-side prompt
+                # builder capability-driven instead of hardcoded.
+                # If a robot doesn't publish capability_details, the
+                # block is just empty; nothing breaks.
+                "details": cap_details,
+            },
+            "gestures": {
+                "available": bool((cap_details.get("gesture") or {}).get("names")),
+                "names": list((cap_details.get("gesture") or {}).get("names") or []),
+                "library": dict((cap_details.get("gesture") or {}).get("library") or {}),
             },
             "depth_camera": {
                 "available": bool(sensors.get("camera_depth")),
@@ -353,13 +389,51 @@ class MujocoAdapter(RobotAdapter):
             a = (action_type or "").lower()
             p = params or {}
 
-            # Generic gestures → /gesture
-            if a in ("wave", "greet", "nod", "shake", "cheer"):
-                # Task executor often labels greet/hello as "wave".
-                name = "wave" if a in ("wave", "greet") else a
+            # ── Gestures ────────────────────────────────────────────
+            # Two paths:
+            #   1. Canonical intent: action_type="gesture", params={name}
+            #   2. Legacy alias:     action_type="wave"|"nod"|...
+            # Either way we read the bridge's live gesture library so
+            # supported names are sourced from /robot/state, not a
+            # hardcoded list. Greet/hello aliases collapse to wave.
+            supported_gestures = self._supported_gestures()
+
+            if a == "gesture":
+                requested = (p.get("name") or "").strip().lower()
+                if not requested:
+                    return {"ok": False, "status": "error", "adapter": self.name,
+                            "action": "gesture", "error": "missing_name",
+                            "supported": supported_gestures}
+                if requested == "greet" or requested == "hello":
+                    requested = "wave"
+                if requested not in supported_gestures:
+                    return {"ok": False, "status": "error", "adapter": self.name,
+                            "action": "gesture", "error": "unsupported_gesture",
+                            "requested": requested,
+                            "supported": supported_gestures}
+                r = self._post("/gesture", {"name": requested})
+                if r is None:
+                    return {"ok": False, "status": "error", "adapter": self.name,
+                            "action": "gesture", "error": self._last_error or "bridge_unreachable"}
+                # Bridge returns {"status":"ok", "gesture", "duration_s", ...}
+                # Surface as a uniform success envelope the gateway can read.
+                return {"ok": True, "adapter": self.name, "action": "gesture",
+                        **r}
+
+            if a in ("wave", "greet", "hello", "nod", "shake", "bow",
+                     "clap", "point_forward", "arms_up", "cheer"):
+                name = "wave" if a in ("wave", "greet", "hello") else a
+                if name not in supported_gestures:
+                    return {"ok": False, "status": "error", "adapter": self.name,
+                            "action": "gesture", "error": "unsupported_gesture",
+                            "requested": name,
+                            "supported": supported_gestures}
                 r = self._post("/gesture", {"name": name})
-                return r or {"status": "ok", "adapter": self.name,
-                             "action": "gesture", "gesture": name}
+                if r is None:
+                    return {"ok": False, "status": "error", "adapter": self.name,
+                            "action": "gesture", "error": self._last_error or "bridge_unreachable"}
+                return {"ok": True, "adapter": self.name, "action": "gesture",
+                        **r}
 
             # Rotation — body yaw, absolute or relative degrees.
             if a in ("rotate", "turn", "spin"):
