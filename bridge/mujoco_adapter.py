@@ -253,21 +253,26 @@ class MujocoAdapter(RobotAdapter):
 
     def capture_photo(self) -> dict:
         """Generic bridge endpoint `capture_photo` → MuJoCo head cam.
-        Returns a base64-encoded JPEG under `image_b64` plus metadata;
-        VLM callers downstream expect the `image_b64` shape."""
+        Returns a base64-encoded JPEG under both `data` and `image_b64`
+        — vlm_processor reads `data`, the look_around / find_visual
+        path reads `image_b64`. Carrying both keeps the wire format
+        ambiguous-tolerant without adding a translation layer."""
         import base64
         try:
             url = f"{self.robot_url}/camera/rgb"
             req = urllib.request.Request(url, method="GET")
             with urllib.request.urlopen(req, timeout=self._timeout) as resp:
                 jpeg = resp.read()
+            b64 = base64.b64encode(jpeg).decode("ascii")
             return {
                 "ok": True,
                 "adapter": self.name,
                 "format": "jpeg",
+                "method": "mujoco_render",
                 "width": 480,
                 "height": 320,
-                "image_b64": base64.b64encode(jpeg).decode("ascii"),
+                "data": b64,
+                "image_b64": b64,
                 "timestamp_s": time.time(),
             }
         except Exception as exc:

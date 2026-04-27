@@ -1370,6 +1370,33 @@ def robot_action(req: ActionRequest, request: Request = None):
 # ── LiDAR endpoint ───────────────────────────────────────────────────────
 
 
+@app.get("/scene/objects")
+def scene_objects():
+    """Ground-truth scene state from the underlying simulator.
+
+    Real robots don't have a "ground truth" — perception has to find
+    objects via the camera/VLM/SLAM stack. The MuJoCo simulator does,
+    and we expose it so the language stack can resolve coloured-cube
+    references ("зелёный куб" → coordinates) deterministically. For
+    H1/E1/HTTP adapters this returns an empty list — callers must fall
+    back to perception."""
+    if _adapter is None:
+        return {"objects": [], "zones": [], "humans": [], "available": False}
+    # mujoco_adapter exposes a private _get; we know the schema and
+    # don't want to add a get_scene_objects() to the abstract base
+    # class only mujoco implements. Best-effort.
+    fetcher = getattr(_adapter, "_get", None)
+    if not callable(fetcher):
+        return {"objects": [], "zones": [], "humans": [], "available": False}
+    try:
+        data = fetcher("/scene/objects") or {}
+    except Exception as exc:
+        logger.warning("scene/objects passthrough failed: %s", exc)
+        return {"objects": [], "zones": [], "humans": [], "available": False}
+    data["available"] = True
+    return data
+
+
 @app.get("/lidar/scan")
 def lidar_scan():
     """Latest LiDAR scan data.

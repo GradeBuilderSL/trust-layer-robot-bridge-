@@ -465,6 +465,35 @@ class SafetyPipeline:
                 min_human_dist = min(min_human_dist, float(e.get("distance_m", 999)))
 
         if min_human_dist < self.HUMAN_STOP_M:
+            # ISO 13482 §5.7.2 prohibits the robot from REDUCING the
+            # separation distance below the threshold. Pure in-place
+            # rotation (vx=vy=0, wz≠0) keeps the robot's footprint
+            # centroid fixed, so the human-to-robot distance is
+            # invariant — denying it would trap the robot any time it
+            # accidentally ended up close to a person, with no way to
+            # turn and back away. Allow rotation, but force a hard zero
+            # on translation so the rule's spirit holds.
+            is_pure_rotation = (
+                abs(vx) < 1e-6 and abs(vy) < 1e-6 and abs(wz) > 1e-6
+            )
+            if is_pure_rotation:
+                self._stats["limited"] += 1
+                self._emit(
+                    "human_rotate_only",
+                    f"Человек в {min_human_dist:.1f} м — поступательное "
+                    f"движение запрещено (HUMAN-001), разрешён только "
+                    f"поворот на месте.",
+                )
+                return 0.0, 0.0, wz, GateResult(
+                    decision="LIMIT",
+                    reason=(
+                        f"Human at {min_human_dist:.1f}m — translation "
+                        f"blocked, in-place rotation allowed"
+                    ),
+                    params={"max_speed_mps": 0.0, "rotation_only": True},
+                    rule_id="HUMAN-001",
+                    audit_ref=_FALLBACK_AUDIT["HUMAN-001"],
+                )
             self._stats["denied"] += 1
             self._emit(
                 "human_stop",
