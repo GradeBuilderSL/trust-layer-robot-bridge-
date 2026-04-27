@@ -1194,7 +1194,13 @@ def robot_action(req: ActionRequest, request: Request = None):
             state = dict(_latest_state)
             entities = list(_latest_entities)
 
-        _, _, _, gate = _pipeline.check(speed, 0.0, 0.0, state, entities)
+        # Pass the FULL velocity triple (vx, vy, wz) to the pipeline.
+        # The earlier code passed (speed, 0, 0), erasing the rotation
+        # component — so the pipeline could never tell pure rotation
+        # apart from translation, and HUMAN-001's `is_pure_rotation`
+        # branch never fired. The pipeline may return tightened
+        # velocities (LIMIT) — honour those instead of the original.
+        nvx, nvy, nwz, gate = _pipeline.check(vx, vy, wz, state, entities)
         robot_id = state.get("robot_id", req.robot_id or f"bridge-{ADAPTER_TYPE}")
         _push_decision(robot_id, f"move vx={vx:.2f} wz={wz:.2f}", gate, trace_id=trace_id)
         _trace_log("safety_check", trace_id=trace_id, action="move", decision=gate.decision, rule_id=gate.rule_id)
@@ -1203,13 +1209,20 @@ def robot_action(req: ActionRequest, request: Request = None):
             return {
                 "status": "denied", "action_id": req.action_id,
                 "action_type": atype, "reason": gate.reason, "rule_id": gate.rule_id,
+                "audit_ref": gate.audit_ref,
             }
 
-        send_result = _adapter.send_velocity(vx, vy, wz)
+        send_result = _adapter.send_velocity(nvx, nvy, nwz)
         _trace_log("adapter_send", trace_id=trace_id, action="move", result=str(send_result)[:200])
         return {
-            "status": "ok", "action_id": req.action_id,
-            "action_type": atype, "result": send_result,
+            "status": "limited" if gate.decision == "LIMIT" else "ok",
+            "action_id": req.action_id,
+            "action_type": atype,
+            "result": send_result,
+            "rule_id": gate.rule_id if gate.decision == "LIMIT" else None,
+            "reason": gate.reason if gate.decision == "LIMIT" else None,
+            "audit_ref": gate.audit_ref if gate.decision == "LIMIT" else None,
+            "params": gate.params if gate.decision == "LIMIT" else None,
         }
 
     # ── navigate_to ───────────────────────────────────────────────────────
