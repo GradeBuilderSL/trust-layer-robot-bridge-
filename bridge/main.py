@@ -212,7 +212,7 @@ def _verify_capability_token(
         "actions": list(tok.actions),
     }
     return ok, reason, info
-from bridge.safety_pipeline import SafetyPipeline
+from bridge.safety_pipeline import SafetyPipeline, set_trace_callback as _pipeline_set_trace
 from bridge.license_manager import LicenseManager
 from bridge.local_brain import LocalBrain
 from bridge.connectivity_monitor import ConnectivityMonitor
@@ -227,9 +227,23 @@ from bridge.local_cache import LocalKnowledgeCache
 
 _trace_logger = logging.getLogger("trace")
 
+# In-memory ring buffer of recent trace events, indexed by trace_id.
+# The demo_ui /api/trace aggregator queries `/v1/traces/{tid}` and
+# stitches these into the timeline alongside demo_ui + NLGW events,
+# so every safety / pipeline / adapter step the bridge runs becomes
+# visible in /debug. Bounded at TRACE_BUFFER_MAX events total — old
+# trace_ids drop out FIFO once the cap is hit so we don't grow
+# unbounded on a long-running deployment.
+_TRACE_BUFFER_MAX = int(os.getenv("BRIDGE_TRACE_BUFFER_MAX", "5000"))
+_trace_buffer: dict[str, list[dict]] = {}
+_trace_order: list[str] = []  # trace_ids in insertion order, for FIFO eviction
+_trace_lock = threading.Lock()
+
 
 def _trace_log(operation: str, trace_id: str = "no-trace", **kwargs):
-    """Emit structured trace log entry."""
+    """Emit structured trace log entry. Also stored in an in-memory
+    ring buffer keyed by trace_id so the demo_ui /debug page can pull
+    bridge-side events for a given chat message."""
     entry = {
         "trace_id": trace_id,
         "service": "bridge",
@@ -238,6 +252,23 @@ def _trace_log(operation: str, trace_id: str = "no-trace", **kwargs):
         **kwargs,
     }
     _trace_logger.info(json.dumps(entry, ensure_ascii=False))
+    if trace_id and trace_id != "no-trace":
+        with _trace_lock:
+            bucket = _trace_buffer.get(trace_id)
+            if bucket is None:
+                bucket = []
+                _trace_buffer[trace_id] = bucket
+                _trace_order.append(trace_id)
+                # Evict oldest trace_ids when over the budget. Keeps
+                # memory flat under sustained chat traffic.
+                while len(_trace_buffer) > _TRACE_BUFFER_MAX // 50 and _trace_order:
+                    drop = _trace_order.pop(0)
+                    _trace_buffer.pop(drop, None)
+            bucket.append(entry)
+            # Cap per-trace events too — a runaway loop shouldn't OOM
+            # the bridge through one trace_id.
+            if len(bucket) > 500:
+                del bucket[: len(bucket) - 500]
 
 
 # ── Configuration ────────────────────────────────────────────────────────
@@ -436,6 +467,21 @@ def _push_decision(robot_id: str, command: str, gate, trace_id: str = "", tier: 
 
 _adapter = None
 _pipeline = SafetyPipeline()
+
+# Bind the safety pipeline's per-rule trace events to the bridge's
+# trace logger + ring buffer. Without this the pipeline runs in
+# silence: the operator only sees the final verdict, not which of
+# the 8 rules ran or why. We thread the trace_id via a threadlocal
+# so the callback can stamp each rule event with the request's id.
+_PIPELINE_TID = threading.local()
+
+
+def _pipeline_trace_event(operation: str, **fields):
+    tid = getattr(_PIPELINE_TID, "trace_id", "no-trace")
+    _trace_log(operation, trace_id=tid, **fields)
+
+
+_pipeline_set_trace(_pipeline_trace_event)
 _license_mgr = LicenseManager(data_dir=DATA_DIR, robot_api_url=None)
 _brain = LocalBrain(data_dir=DATA_DIR)
 _event_buf = EventBuffer(db_path=f"{DATA_DIR}/event_buffer.db")
@@ -1099,6 +1145,10 @@ def robot_action(req: ActionRequest, request: Request = None):
             _agent_id, atype,
             params=dict(req.params or {}),
         )
+        _trace_log("forbidden_combo_check", trace_id=trace_id,
+                   layer="forbidden_combos", action=atype,
+                   decision="PASS" if _combo_ok else "DENY",
+                   violation=(_violated.name if not _combo_ok else None))
         if not _combo_ok:
             if _trust_tracker is not None:
                 _trust_tracker.record(_agent_id, "forbidden_combo", _violated.name)
@@ -1133,6 +1183,12 @@ def robot_action(req: ActionRequest, request: Request = None):
                   or float((req.params or {}).get("speed", 0.0))
                   or float((req.params or {}).get("speed_mps", 0.0)))
     _hitl_override = bool((req.params or {}).get("hitl_override", False))
+    _trace_log("hitl_gate_eval", trace_id=trace_id,
+               layer="hitl_gate", rule_id="ISO13482-SPEED-NEAR-HUMAN-001",
+               audit_ref="ISO 13482:2014 §5.7.2",
+               action=atype, requested_speed_mps=round(_req_speed, 2),
+               override=_hitl_override,
+               escalation_threshold_mps=0.5)
     _hitl_meta = _speed_near_human_hitl_check(
         action_label=f"action:{atype}",
         action_type_for_movement=atype,
@@ -1143,6 +1199,12 @@ def robot_action(req: ActionRequest, request: Request = None):
         trace_id=trace_id,
         override=_hitl_override,
     )
+    if _hitl_meta:
+        _trace_log("hitl_gate_decision", trace_id=trace_id,
+                   layer="hitl_gate", rule_id="ISO13482-SPEED-NEAR-HUMAN-001",
+                   blocked=_hitl_meta.get("blocked"),
+                   decision=_hitl_meta.get("decision"),
+                   nearest_human_m=_hitl_meta.get("nearest_human_m"))
     if _hitl_meta and _hitl_meta.get("blocked"):
         return {
             "status": "denied",
@@ -1200,6 +1262,7 @@ def robot_action(req: ActionRequest, request: Request = None):
         # apart from translation, and HUMAN-001's `is_pure_rotation`
         # branch never fired. The pipeline may return tightened
         # velocities (LIMIT) — honour those instead of the original.
+        _PIPELINE_TID.trace_id = trace_id
         nvx, nvy, nwz, gate = _pipeline.check(vx, vy, wz, state, entities)
         robot_id = state.get("robot_id", req.robot_id or f"bridge-{ADAPTER_TYPE}")
         _push_decision(robot_id, f"move vx={vx:.2f} wz={wz:.2f}", gate, trace_id=trace_id)
@@ -1236,6 +1299,7 @@ def robot_action(req: ActionRequest, request: Request = None):
             state = dict(_latest_state)
             entities = list(_latest_entities)
 
+        _PIPELINE_TID.trace_id = trace_id
         _, _, _, gate = _pipeline.check(speed, 0.0, 0.0, state, entities)
         robot_id = state.get(
             "robot_id", req.robot_id or f"bridge-{ADAPTER_TYPE}"
@@ -1381,6 +1445,17 @@ def robot_action(req: ActionRequest, request: Request = None):
 
 
 # ── LiDAR endpoint ───────────────────────────────────────────────────────
+
+
+@app.get("/v1/traces/{trace_id}")
+def get_trace(trace_id: str):
+    """Return the bridge-side trace events for a given trace_id.
+    The demo_ui /api/trace aggregator queries this so /debug shows
+    safety_pipeline / HITL / forbidden_combo / adapter_send events
+    interleaved with NLGW + demo_ui events on the same timeline."""
+    with _trace_lock:
+        events = list(_trace_buffer.get(trace_id, []))
+    return {"trace_id": trace_id, "events": events, "count": len(events)}
 
 
 @app.get("/scene/objects")

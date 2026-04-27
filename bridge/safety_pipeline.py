@@ -71,6 +71,31 @@ def _try_load_action_gate():
 _gate = _try_load_action_gate()
 
 
+# ── Trace callback ────────────────────────────────────────────────────────────
+# robot_bridge installs a callback so per-rule evaluations show up in
+# the demo_ui /debug timeline alongside everything else. Without this
+# the pipeline runs silently — operators couldn't see WHICH of the 8
+# rules ran for a given command, only the final verdict.
+
+_trace_cb = None
+
+
+def set_trace_callback(cb):
+    """Install a `cb(operation: str, **fields)` that the pipeline calls
+    for every rule evaluation. robot_bridge's `_trace_log` is the
+    expected target. Optional — pipeline still works without it."""
+    global _trace_cb
+    _trace_cb = cb
+
+
+def _trace(operation: str, **fields):
+    if _trace_cb is not None:
+        try:
+            _trace_cb(operation, **fields)
+        except Exception:
+            pass
+
+
 # ── Data structures ───────────────────────────────────────────────────────────
 
 @dataclass
@@ -424,6 +449,21 @@ class SafetyPipeline:
         speed = math.hypot(vx, vy)
         battery = float(robot_state.get("battery", 100))
         tilt = float(robot_state.get("tilt_deg", 0))
+        # Trace every rule pass so /debug surfaces what the pipeline
+        # actually checks — not just the final decision. The operator
+        # needs to see "battery ✓ tilt ✓ humans@0.8m → LIMIT" to
+        # believe the safety system ran.
+        _trace(
+            "pipeline_check_start", layer="safety_pipeline",
+            backend="fallback_8_rules",
+            inputs={
+                "vx": round(vx, 3), "vy": round(vy, 3), "wz": round(wz, 3),
+                "speed_mps": round(speed, 3),
+                "battery_pct": round(battery, 1),
+                "tilt_deg": round(tilt, 2),
+                "n_entities": len(entities),
+            },
+        )
 
         # 1. Battery critical
         if battery < self.BATTERY_CRITICAL:
@@ -435,12 +475,20 @@ class SafetyPipeline:
                 f"[{_FALLBACK_AUDIT['BATT-001']}]",
                 8.0,
             )
+            _trace("pipeline_rule", layer="safety_pipeline", rule_id="BATT-001",
+                   decision="DENY", check="battery_critical",
+                   value_pct=round(battery, 1),
+                   threshold_pct=self.BATTERY_CRITICAL,
+                   audit_ref=_FALLBACK_AUDIT["BATT-001"])
             return 0, 0, 0, GateResult(
                 decision="DENY",
                 reason=f"Battery critical ({battery:.0f}%)",
                 rule_id="BATT-001",
                 audit_ref=_FALLBACK_AUDIT["BATT-001"],
             )
+        _trace("pipeline_rule", layer="safety_pipeline", rule_id="BATT-001",
+               decision="PASS", check="battery_critical",
+               value_pct=round(battery, 1), threshold_pct=self.BATTERY_CRITICAL)
 
         # 2. Tilt E-STOP
         if abs(tilt) > self.TILT_LIMIT_DEG:
@@ -451,12 +499,19 @@ class SafetyPipeline:
                 "Аварийная остановка — риск опрокидывания.",
                 5.0,
             )
+            _trace("pipeline_rule", layer="safety_pipeline", rule_id="TILT-001",
+                   decision="DENY", check="tilt_estop",
+                   value_deg=round(tilt, 2), threshold_deg=self.TILT_LIMIT_DEG,
+                   audit_ref=_FALLBACK_AUDIT["TILT-001"])
             return 0, 0, 0, GateResult(
                 decision="DENY",
                 reason=f"Tilt {tilt:.1f}° exceeds {self.TILT_LIMIT_DEG}°",
                 rule_id="TILT-001",
                 audit_ref=_FALLBACK_AUDIT["TILT-001"],
             )
+        _trace("pipeline_rule", layer="safety_pipeline", rule_id="TILT-001",
+               decision="PASS", check="tilt_estop",
+               value_deg=round(tilt, 2), threshold_deg=self.TILT_LIMIT_DEG)
 
         # 3. Human proximity
         min_human_dist = float("inf")
@@ -464,6 +519,11 @@ class SafetyPipeline:
             if e.get("is_human") or e.get("class_name") == "person":
                 min_human_dist = min(min_human_dist, float(e.get("distance_m", 999)))
 
+        _trace("pipeline_rule", layer="safety_pipeline", rule_id="HUMAN-001",
+               decision="EVAL", check="human_proximity",
+               min_human_m=(round(min_human_dist, 2) if min_human_dist != float("inf") else None),
+               threshold_stop_m=self.HUMAN_STOP_M,
+               threshold_slow_m=self.HUMAN_SLOW_M)
         if min_human_dist < self.HUMAN_STOP_M:
             # ISO 13482 §5.7.2 prohibits the robot from REDUCING the
             # separation distance below the threshold. Pure in-place
@@ -484,6 +544,11 @@ class SafetyPipeline:
                     f"движение запрещено (HUMAN-001), разрешён только "
                     f"поворот на месте.",
                 )
+                _trace("pipeline_rule", layer="safety_pipeline",
+                       rule_id="HUMAN-001", decision="LIMIT",
+                       check="human_proximity_rotation_only",
+                       min_human_m=round(min_human_dist, 2),
+                       audit_ref=_FALLBACK_AUDIT["HUMAN-001"])
                 return 0.0, 0.0, wz, GateResult(
                     decision="LIMIT",
                     reason=(
@@ -500,6 +565,12 @@ class SafetyPipeline:
                 f"Человек в {min_human_dist:.1f} м — ближе порога "
                 f"{self.HUMAN_STOP_M} м. Полная остановка (HUMAN-001).",
             )
+            _trace("pipeline_rule", layer="safety_pipeline",
+                   rule_id="HUMAN-001", decision="DENY",
+                   check="human_proximity",
+                   min_human_m=round(min_human_dist, 2),
+                   threshold_m=self.HUMAN_STOP_M,
+                   audit_ref=_FALLBACK_AUDIT["HUMAN-001"])
             return 0, 0, 0, GateResult(
                 decision="DENY",
                 reason=f"Human too close ({min_human_dist:.1f}m < {self.HUMAN_STOP_M}m)",
@@ -517,6 +588,12 @@ class SafetyPipeline:
                 f"Человек приближается — {min_human_dist:.1f} м. "
                 f"Снижаю скорость до {self.HUMAN_SLOW_SPEED} м/с.",
             )
+            _trace("pipeline_rule", layer="safety_pipeline",
+                   rule_id="HUMAN-002", decision="LIMIT",
+                   check="human_nearby_speed_limit",
+                   min_human_m=round(min_human_dist, 2),
+                   max_speed_mps=self.HUMAN_SLOW_SPEED,
+                   audit_ref=_FALLBACK_AUDIT["HUMAN-002"])
             return vx, vy, wz, GateResult(
                 decision="LIMIT",
                 reason=f"Human nearby ({min_human_dist:.1f}m), speed limited",
@@ -532,10 +609,18 @@ class SafetyPipeline:
                 d = float(e.get("distance_m", 999))
                 if d < min_obs_dist:
                     min_obs_dist = d
-
+        _trace("pipeline_rule", layer="safety_pipeline", rule_id="OBS-001",
+               decision="EVAL", check="obstacle_proximity",
+               min_obstacle_m=(round(min_obs_dist, 2) if min_obs_dist != float("inf") else None),
+               threshold_m=self.OBSTACLE_STOP_M)
         if min_obs_dist < self.OBSTACLE_STOP_M and speed > 0.1:
             self._stats["denied"] += 1
             self._emit("obstacle_stop", f"Препятствие в {min_obs_dist:.1f} м — остановка.")
+            _trace("pipeline_rule", layer="safety_pipeline", rule_id="OBS-001",
+                   decision="DENY", check="obstacle_proximity",
+                   min_obstacle_m=round(min_obs_dist, 2),
+                   threshold_m=self.OBSTACLE_STOP_M,
+                   audit_ref=_FALLBACK_AUDIT["OBS-001"])
             return 0, 0, 0, GateResult(
                 decision="DENY",
                 reason=f"Obstacle too close ({min_obs_dist:.1f}m)",
@@ -570,6 +655,8 @@ class SafetyPipeline:
 
         # All clear
         self._stats["allowed"] += 1
+        _trace("pipeline_check_done", layer="safety_pipeline",
+               decision="ALLOW", speed_mps=round(speed, 3))
         if speed > 0.1:
             self._emit(
                 "nominal",
