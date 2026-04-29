@@ -297,7 +297,7 @@ def _port_from_env() -> int:
             return int(raw)
     return 8080
 BRIDGE_PORT = _port_from_env()
-POLL_HZ = int(os.getenv("POLL_HZ", "10"))
+POLL_HZ = int(os.getenv("POLL_HZ", "2"))
 WORKSTATION_URL = os.getenv("WORKSTATION_URL", "http://localhost:8888")
 DATA_DIR = os.getenv("DATA_DIR", "/data")
 ACTIVATION_SERVER = os.getenv(
