@@ -1288,6 +1288,84 @@ def robot_action(req: ActionRequest, request: Request = None):
             "params": gate.params if gate.decision == "LIMIT" else None,
         }
 
+    # ── joint_velocity (motor_compiler integration) ──────────────────────
+    # Per-joint velocity command — bypasses the whole-body locomotion
+    # heuristics in the adapter and drives every actuator directly.
+    # The safety pipeline still gates it: forwarded as a tiny base-
+    # velocity signal so HUMAN-001 / OBS-001 still apply, then the
+    # body of the command goes to the adapter as a `joint_velocity`
+    # action so the adapter can choose how to apply it (mujoco_adapter
+    # routes to /robot/joint_velocity on mujoco_bridge).
+    if atype == "joint_velocity":
+        params = dict(req.params or {})
+        qd = params.get("joint_velocities") or params.get("velocities") or []
+        joint_names = params.get("joint_names") or []
+        speed_proxy = 0.0
+        try:
+            if qd:
+                speed_proxy = float(max(abs(float(v)) for v in qd))
+        except (TypeError, ValueError):
+            speed_proxy = 0.0
+
+        with _state_lock:
+            state = dict(_latest_state)
+            entities = list(_latest_entities)
+        _PIPELINE_TID.trace_id = trace_id
+        nvx, nvy, nwz, gate = _pipeline.check(
+            speed_proxy, 0.0, 0.0, state, entities,
+        )
+        robot_id = state.get(
+            "robot_id", req.robot_id or f"bridge-{ADAPTER_TYPE}",
+        )
+        _push_decision(
+            robot_id,
+            f"action:joint_velocity n={len(qd)} max|v|={speed_proxy:.2f}",
+            gate, trace_id=trace_id,
+        )
+        _trace_log(
+            "safety_check", trace_id=trace_id, action="joint_velocity",
+            decision=gate.decision, rule_id=gate.rule_id,
+        )
+        if gate.decision == "DENY":
+            return {
+                "status": "denied", "action_id": req.action_id,
+                "action_type": atype, "reason": gate.reason,
+                "rule_id": gate.rule_id, "audit_ref": gate.audit_ref,
+            }
+        # If LIMIT: apply the same scaling the pipeline used on the
+        # base-velocity proxy to every joint command. Conservative —
+        # would rather slow than risk.
+        if gate.decision == "LIMIT" and speed_proxy > 1e-6:
+            scale = max(0.0, abs(nvx) / speed_proxy)
+            qd = [float(v) * scale for v in qd]
+        # Forward to the adapter. Adapter API is:
+        #   handle_action("joint_velocity", {joint_velocities, joint_names})
+        send_result = {"status": "ok"}
+        try:
+            if hasattr(_adapter, "handle_action"):
+                send_result = _adapter.handle_action(
+                    "joint_velocity",
+                    {"joint_velocities": qd, "joint_names": joint_names},
+                ) or {"status": "ok"}
+            else:
+                send_result = {"status": "not_supported",
+                               "error": "adapter lacks handle_action"}
+        except Exception as exc:
+            logger.warning("joint_velocity dispatch failed: %s", exc)
+            send_result = {"status": "error", "error": str(exc)}
+        _trace_log("adapter_send", trace_id=trace_id,
+                   action="joint_velocity",
+                   result=str(send_result)[:200])
+        return {
+            "status": "limited" if gate.decision == "LIMIT" else "ok",
+            "action_id": req.action_id,
+            "action_type": atype,
+            "result": send_result,
+            "rule_id": gate.rule_id if gate.decision == "LIMIT" else None,
+            "reason": gate.reason if gate.decision == "LIMIT" else None,
+            "audit_ref": gate.audit_ref if gate.decision == "LIMIT" else None,
+        }
+
     # ── navigate_to ───────────────────────────────────────────────────────
     if atype == "navigate_to":
         pos = req.target_position or {}

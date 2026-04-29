@@ -543,6 +543,20 @@ class MujocoAdapter(RobotAdapter):
                 r = self._post("/robot/place", {"zone": zone})
                 return r or {"status": "error", "error": self._last_error}
 
+            # motor_compiler joint-velocity passthrough. Mujoco bridge
+            # has /robot/joint_velocity that integrates per-actuator
+            # velocity into ctrl targets.
+            if a == "joint_velocity":
+                body = {
+                    "joint_velocities": p.get("joint_velocities", []),
+                    "joint_names": p.get("joint_names", []),
+                }
+                r = self._post("/robot/joint_velocity", body)
+                if r is None:
+                    return {"status": "error", "adapter": self.name,
+                            "error": self._last_error}
+                return r
+
             # ROS2 twist translation — same shape HttpAdapter uses so
             # task_executor's ros2_publish path keeps working.
             if a == "ros2_publish":
