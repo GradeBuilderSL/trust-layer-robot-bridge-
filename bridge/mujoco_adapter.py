@@ -106,6 +106,7 @@ class MujocoAdapter(RobotAdapter):
             # when base odometry is missing. mujoco_bridge already
             # returns `joint_positions` in the response.
             "joint_positions": [float(j) for j in (raw.get("joint_positions") or [])],
+            "joint_velocities": [float(j) for j in (raw.get("joint_velocities") or [])],
             "joint_names": list(raw.get("joint_names") or []),
             # Rich MuJoCo-only fields forwarded verbatim so the UI /
             # task_executor can surface them when present (action,
