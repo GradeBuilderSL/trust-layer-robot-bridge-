@@ -28,28 +28,32 @@ _rules_loaded = 0     # count of rules loaded from YAML
 def _try_load_action_gate():
     """Attempt to import ActionGate from libs/ontology. Returns gate or None.
 
-    API note: we previously reached into `gate._engine._loader._rules` to
-    count rules, which hasn't been the real attribute path in ActionGate
-    since RuleEngine was refactored — every bridge startup was silently
-    falling through to the 6-rule fallback and reporting it in /health.
-    The fix uses the documented `gate.engine.rules` attribute (alias
-    `gate.rule_engine`) which ActionGate has exposed since the refactor.
-    """
+    The ActionGate API exposes ``rule_count`` (a property returning the
+    number of rules currently loaded by ``_engine.loader``) and
+    ``_engine`` (a RuleEngine whose ``.loader.rules`` is the live list).
+    Earlier code looked for ``gate.engine`` / ``gate.rule_engine`` /
+    ``gate.engine._loader._rules`` — none of those names exist, so every
+    bridge startup silently fell through to the built-in fallback and
+    reported ``rules_backend: fallback_6_rules`` in /health while
+    ActionGate had actually loaded 137 rules. Use the public property
+    first; fall back to walking the private ``_engine.loader`` attr
+    only if the property is missing on an older ActionGate."""
     global _gate, _rules_loaded
     if _LIBS_DIR and _LIBS_DIR not in sys.path:
         sys.path.insert(0, _LIBS_DIR)
     try:
         from ontology.action_gate import ActionGate  # noqa: PLC0415
         gate = ActionGate()
-        # Preferred: documented attribute exposed by ActionGate.
-        engine = getattr(gate, "engine", None) or getattr(gate, "rule_engine", None)
-        rules = getattr(engine, "rules", None) if engine is not None else None
-        if rules is None:
-            # Fallback path for older ActionGate variants that keep rules
-            # on a loader object. Defensive — do not crash on either shape.
-            loader = getattr(engine, "_loader", None) if engine is not None else None
-            rules = getattr(loader, "_rules", None) if loader is not None else None
-        _rules_loaded = len(rules) if rules is not None else 0
+        count = getattr(gate, "rule_count", None)
+        if isinstance(count, int):
+            _rules_loaded = count
+        else:
+            engine = getattr(gate, "_engine", None) or getattr(gate, "engine", None)
+            loader = getattr(engine, "loader", None) if engine is not None else None
+            rules = getattr(loader, "rules", None) if loader is not None else None
+            if rules is None and loader is not None:
+                rules = getattr(loader, "_rules", None)
+            _rules_loaded = len(rules) if rules is not None else 0
         if _rules_loaded == 0:
             logger.warning(
                 "safety_pipeline: ActionGate loaded but 0 rules found — "
