@@ -1413,9 +1413,14 @@ def robot_action(req: ActionRequest, request: Request = None):
         robot_id = state.get(
             "robot_id", req.robot_id or f"bridge-{ADAPTER_TYPE}",
         )
+        # Log the *actual* peak joint velocity, not the speed-proxy
+        # (which we deliberately set to 0 for joint_velocity so the
+        # navigate-rule family stays silent). The previous version
+        # printed speed_proxy here and every audit row read
+        # max|v|=0.00 even when the arm was waving at 2 rad/s.
         _push_decision(
             robot_id,
-            f"action:joint_velocity n={len(qd)} max|v|={speed_proxy:.2f}",
+            f"action:joint_velocity n={len(qd)} max|v|={max_v:.2f}",
             gate, trace_id=trace_id,
         )
         _trace_log(
@@ -1498,11 +1503,26 @@ def robot_action(req: ActionRequest, request: Request = None):
         if nav_result.get("status") == "not_supported" and _local_navigator:
             logger.info("Adapter doesn't support navigate_to, using LocalNavigator")
             nav_result = _local_navigator.navigate_to(x_m, y_m, speed_mps=speed)
+        # Propagate the safety verdict back to the caller so the chat
+        # layer can surface a LIMIT acknowledgement ("Speed capped to
+        # 0.8 m/s — SPEED-001"). Spec §5: silent clamping is a UX
+        # failure. Previously the response always reported
+        # ``status="ok"`` regardless of whether the action gate
+        # clamped the speed, so the operator never learned that
+        # safety overrode them.
+        out_status = (
+            "limited" if gate.decision == "LIMIT"
+            else "ok" if nav_result.get("status") != "not_supported"
+            else "fallback"
+        )
         return {
-            "status": "ok" if nav_result.get("status") != "not_supported" else "fallback",
+            "status": out_status,
             "action_id": req.action_id,
             "action_type": atype,
             "result": nav_result,
+            "rule_id": gate.rule_id if gate.decision == "LIMIT" else None,
+            "reason": gate.reason if gate.decision == "LIMIT" else None,
+            "audit_ref": gate.audit_ref if gate.decision == "LIMIT" else None,
         }
 
     # ── scan ──────────────────────────────────────────────────────────────
