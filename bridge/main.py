@@ -243,7 +243,13 @@ _trace_lock = threading.Lock()
 def _trace_log(operation: str, trace_id: str = "no-trace", **kwargs):
     """Emit structured trace log entry. Also stored in an in-memory
     ring buffer keyed by trace_id so the demo_ui /debug page can pull
-    bridge-side events for a given chat message."""
+    bridge-side events for a given chat message. When
+    BRIDGE_FORWARD_TRACE_TO_DECISION_LOG is set, every bridge event is
+    additionally POSTed to decision_log /log so the cloud-side
+    operator UI sees ALLOW decisions, per-rule evaluations and ROS
+    dispatches under the same trace_id as the chat — without it,
+    bridge events stayed local on the robot and the cloud trace UI
+    showed the chain ending at NLGW.dispatch."""
     entry = {
         "trace_id": trace_id,
         "service": "bridge",
@@ -269,6 +275,40 @@ def _trace_log(operation: str, trace_id: str = "no-trace", **kwargs):
             # the bridge through one trace_id.
             if len(bucket) > 500:
                 del bucket[: len(bucket) - 500]
+        # Optional cloud forwarding. Default OFF on the robot because
+        # most deploys keep the local-only audit; the operator UI
+        # serves bridge events via /v1/traces/<tid>. Set the env var
+        # to "1" when the cloud trace timeline should reflect bridge
+        # events directly without an extra /v1/traces fetch.
+        _forward_trace_to_decision_log(entry)
+
+
+_DECISION_LOG_FORWARD_URL = os.environ.get("DECISION_LOG_URL", "").strip().rstrip("/")
+_DECISION_LOG_FORWARD_ENABLED = os.environ.get(
+    "BRIDGE_FORWARD_TRACE_TO_DECISION_LOG", "0").strip().lower() in (
+    "1", "true", "yes")
+
+
+def _forward_trace_to_decision_log(entry: dict) -> None:
+    if (not _DECISION_LOG_FORWARD_ENABLED or
+            not _DECISION_LOG_FORWARD_URL):
+        return
+    url = _DECISION_LOG_FORWARD_URL + "/log"
+    body = json.dumps(entry).encode("utf-8")
+
+    def _send():
+        try:
+            req = urllib.request.Request(
+                url, data=body, method="POST",
+                headers={"Content-Type": "application/json"})
+            urllib.request.urlopen(req, timeout=2.0)
+        except Exception:
+            # Fail-soft. Operator-side tracing is a nice-to-have;
+            # the local ring buffer is the source of truth on the robot.
+            pass
+
+    threading.Thread(target=_send, daemon=True,
+                      name="bridge-trace-forward").start()
 
 
 # ── Configuration ────────────────────────────────────────────────────────
@@ -570,6 +610,23 @@ def _create_adapter():
     if ADAPTER_TYPE == "mujoco":
         mj_url = os.getenv("ROBOT_URL", "http://mujoco_bridge:8000")
         return MujocoAdapter(robot_url=mj_url)
+    if ADAPTER_TYPE == "isaac":
+        # Isaac Sim G1-29DOF Dex1 bridge. Same HTTP contract as the
+        # MuJoCo bridge (/robot/state, /robot/move, /robot/pick,
+        # /robot/place, /robot/joint_velocity, /gesture, …) — see
+        # scripts/simulations/g1_bridge_trustlayer.py. We reuse
+        # MujocoAdapter as the transport because the protocol is
+        # identical; only the underlying physics differs (Isaac uses
+        # PhysX with proper finger contacts, MuJoCo uses weld-equality
+        # constraints). The label exists so /health reports the
+        # accurate backend instead of "mujoco" when the operator is
+        # looking at Isaac.
+        isaac_url = os.getenv(
+            "ROBOT_URL", "http://127.0.0.1:8000",
+        )
+        adapter = MujocoAdapter(robot_url=isaac_url)
+        adapter.name = "isaac"
+        return adapter
     return MockAdapter()
 
 
@@ -911,6 +968,28 @@ def robot_stop(request: Request = None):
         raise HTTPException(503, "Adapter not initialized")
     _watchdog.heartbeat()  # operator is present
     result = _adapter.stop()
+
+    # Emergency stops must always be auditable, even when they bypass
+    # the action-gate fast path. Build an inline ALLOW gate so the
+    # event lands in decision_log with rule_id=EMERGENCY-STOP.
+    try:
+        with _state_lock:
+            state = dict(_latest_state)
+        robot_id = state.get("robot_id") or f"bridge-{ADAPTER_TYPE}"
+
+        class _StopGate:
+            decision = "ALLOW"
+            rule_id = "EMERGENCY-STOP"
+            reason = "Emergency stop received from operator/NLGW."
+            audit_ref = "ISO 13482:2014 §5.7.7 (emergency stop)"
+            params = None
+
+        _push_decision(
+            robot_id, "stop", _StopGate(), trace_id=trace_id, tier="emergency",
+        )
+    except Exception as _exc:
+        logger.debug("stop audit log push ignored: %s", _exc)
+
     return result
 
 
@@ -1300,12 +1379,29 @@ def robot_action(req: ActionRequest, request: Request = None):
         params = dict(req.params or {})
         qd = params.get("joint_velocities") or params.get("velocities") or []
         joint_names = params.get("joint_names") or []
+
+        # joint_velocity is per-joint rad/s. The pipeline's speed-limit
+        # rules (OSHA-SPEED-LIMIT, SPEED-001) and the ActionGate's
+        # "navigate" classification both expect *base* m/s. Mixing the
+        # units DENY'd every gesture: an arm waved at 4 rad/s was read
+        # as the robot driving at 4 m/s, well over the 2.2 m/s OSHA
+        # forklift cap. The base does not move during a joint-velocity
+        # command; the adapter computes any base motion downstream from
+        # forward kinematics on a stationary chassis. Pass ``0.0`` here
+        # so the navigate rule family stays silent. Per-joint limits
+        # (position, torque, contact force) are enforced inside the
+        # motor_compiler CBF and the adapter's joint-limit checks —
+        # those are the correct gates for arm/head/leg joint rad/s,
+        # not the OSHA vehicle-speed family.
         speed_proxy = 0.0
+        # Compute the largest |v| just for telemetry; never used in
+        # the safety decision.
+        max_v = 0.0
         try:
             if qd:
-                speed_proxy = float(max(abs(float(v)) for v in qd))
+                max_v = float(max(abs(float(v)) for v in qd))
         except (TypeError, ValueError):
-            speed_proxy = 0.0
+            max_v = 0.0
 
         with _state_lock:
             state = dict(_latest_state)
